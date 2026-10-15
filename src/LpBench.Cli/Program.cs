@@ -147,9 +147,8 @@ static string G(double v) => v.ToString("R", CultureInfo.InvariantCulture);
 static int CmdRun(Dictionary<string, string> o)
 {
     var p = LoadParams(o);
-    if (o.TryGetValue("repeats", out var rep)) p.Set("repeats", rep);
-    if (o.TryGetValue("warmup", out var wu)) p.Set("warmup", wu);
-    int repeats = p.I("repeats"), warmup = p.I("warmup");
+    int? repeatsOverride = o.TryGetValue("repeats", out var rep) ? int.Parse(rep, CultureInfo.InvariantCulture) : null;
+    int? warmupOverride = o.TryGetValue("warmup", out var wu) ? int.Parse(wu, CultureInfo.InvariantCulture) : null;
     var methods = ListOpt(o, "methods", SolverFactory.AllMethods);
     var tasks = SelectTasks(o).ToList();
     string outPath = o.TryGetValue("out", out var op) ? op : throw new ArgumentException("--out is required.");
@@ -167,6 +166,8 @@ static int CmdRun(Dictionary<string, string> o)
         {
             var solver = SolverFactory.Create(method, p, e.Class);
             var limits = SolverFactory.Limits(method, p, e.Class, sf.Rows, sf.Cols);
+            int repeats = Math.Min(repeatsOverride ?? int.MaxValue, p.IForMethodClass("repeats", method, e.Class));
+            int warmup = Math.Min(warmupOverride ?? int.MaxValue, p.IForMethodClass("warmup", method, e.Class));
             for (int r = 0; r < warmup + repeats; r++)
             {
                 var sw = Stopwatch.StartNew();

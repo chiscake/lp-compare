@@ -37,18 +37,7 @@ public sealed class DlnSolver : ILpSolver
         int m = sf.Rows, n = sf.Cols;
         int rows = m + 1, cols = n + 1;
 
-        double m0 = 0;
-        for (int j = 0; j < n; j++)
-        {
-            double bound = double.PositiveInfinity;
-            for (int i = 0; i < m; i++)
-            {
-                double aij = sf.A[i * n + j];
-                if (aij > 0) bound = Math.Min(bound, sf.B[i] / aij);
-            }
-            m0 += bound;
-        }
-        double bigM = (1 + BoundSlack) * m0;
+        double bigM = (1 + BoundSlack) * SumBound(sf);
 
         var a = new double[rows * cols];
         var b = new double[rows];
@@ -131,6 +120,33 @@ public sealed class DlnSolver : ILpSolver
             Iterations = iter,
             Residual = residual,
         };
+    }
+
+    /// <summary>
+    /// Upper bound on 1ᵀz over the feasible set, the smaller of two valid bounds:
+    /// Σⱼ min_{aᵢⱼ>0} bᵢ/aᵢⱼ (per-variable bounds) and γ·Σbᵢ with γ = max(1, 1/minⱼ Σᵢaᵢⱼ)
+    /// (for y = γ·1 every column satisfies Aᵀy ≥ 1, hence 1ᵀz ≤ yᵀAz = yᵀb).
+    /// </summary>
+    public static double SumBound(StandardForm sf)
+    {
+        int m = sf.Rows, n = sf.Cols;
+        double perVariable = 0, minColumnSum = double.PositiveInfinity;
+        for (int j = 0; j < n; j++)
+        {
+            double bound = double.PositiveInfinity, colSum = 0;
+            for (int i = 0; i < m; i++)
+            {
+                double aij = sf.A[i * n + j];
+                colSum += aij;
+                if (aij > 0) bound = Math.Min(bound, sf.B[i] / aij);
+            }
+            perVariable += bound;
+            minColumnSum = Math.Min(minColumnSum, colSum);
+        }
+        double sumB = 0;
+        foreach (var v in sf.B) sumB += v;
+        double dual = Math.Max(1.0, 1.0 / minColumnSum) * sumB;
+        return Math.Min(perVariable, dual);
     }
 
     private static double SpectralNormSquared(double[] a, int rows, int cols, int iterations)

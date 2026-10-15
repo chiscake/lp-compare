@@ -38,6 +38,12 @@ internal sealed class Params
     public string ForClass(string key, string cls) =>
         _values.TryGetValue($"{key}.{cls}", out var v) ? v : Get(key);
 
+    /// <summary>Looks up "key.METHOD.CLASS", then "key.CLASS", then "key".</summary>
+    public int IForMethodClass(string key, string method, string cls) =>
+        _values.TryGetValue($"{key}.{method}.{cls}", out var v)
+            ? int.Parse(v, CultureInfo.InvariantCulture)
+            : IForClass(key, cls);
+
     public double DForClass(string key, string cls) => double.Parse(ForClass(key, cls), CultureInfo.InvariantCulture);
     public int IForClass(string key, string cls) => int.Parse(ForClass(key, cls), CultureInfo.InvariantCulture);
 

@@ -137,16 +137,38 @@ public class SolverTests
     {
         var p = Illustrative();
         var sf = StandardForm.FromResourceProblem(p);
-        var coarse = new DlnSolver { Lambda = 0.05, Kappa = 30 }.Solve(sf, Default);
-        var fine = new DlnSolver { Lambda = 0.005, Kappa = 30 }.Solve(sf, new SolverLimits { MaxIterations = 2_000_000, TimeLimit = TimeSpan.FromSeconds(60) });
+        var limits = new SolverLimits { MaxIterations = 2_000_000, TimeLimit = TimeSpan.FromSeconds(60) };
+        var coarse = new DlnSolver { Lambda = 0.05, Kappa = 3 }.Solve(sf, limits);
+        var fine = new DlnSolver { Lambda = 0.005, Kappa = 3 }.Solve(sf, limits);
         Assert.Equal(SolveStatus.Solved, coarse.Status);
         Assert.Equal(SolveStatus.Solved, fine.Status);
         var gCoarse = Metrics.Evaluate(p, coarse.Z, 150).Gap;
         var gFine = Metrics.Evaluate(p, fine.Z, 150);
         Assert.True(gFine.Gap < gCoarse, $"fine {gFine.Gap} vs coarse {gCoarse}");
-        Assert.True(gFine.Gap < 1e-2, $"gap {gFine.Gap}");
+        Assert.True(gFine.Gap < 1e-3, $"gap {gFine.Gap}");
         Assert.True(gFine.Violation < 1e-6, $"viol {gFine.Violation}");
         Assert.All(fine.Z, v => Assert.True(v > 0));
+    }
+
+    /// <summary>Theorem 3.5: the limit carries a bias term proportional to the step size.</summary>
+    [Fact]
+    public void Dln_LargeStep_BiasesTheLimit()
+    {
+        var p = Illustrative();
+        var sf = StandardForm.FromResourceProblem(p);
+        var limits = new SolverLimits { MaxIterations = 2_000_000 };
+        var small = new DlnSolver { Lambda = 0.005, Kappa = 3 }.Solve(sf, limits);
+        var large = new DlnSolver { Lambda = 0.005, Kappa = 30 }.Solve(sf, limits);
+        Assert.Equal(SolveStatus.Solved, large.Status);
+        Assert.True(large.Iterations < small.Iterations);
+        Assert.True(Metrics.Evaluate(p, large.Z, 150).Gap > 100 * Metrics.Evaluate(p, small.Z, 150).Gap);
+    }
+
+    [Fact]
+    public void Dln_SumBound_UsesTheTighterOfTwoBounds()
+    {
+        var sf = StandardForm.FromResourceProblem(Illustrative());
+        Assert.Equal(690, DlnSolver.SumBound(sf), 12);
     }
 
     [Fact]
