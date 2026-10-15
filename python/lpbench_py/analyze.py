@@ -161,15 +161,55 @@ def entropy_bound(data: Path, manifest: pd.DataFrame, task_ids: list[str]) -> pd
     files = manifest.set_index("id")
     for tid in task_ids:
         a, b, c = read_lpb(data / files.loc[tid, "file"])
-        with np.errstate(divide="ignore"):
-            u = np.where(a > 0, b[:, None] / np.where(a > 0, a, 1), np.inf).min(axis=0)
-        big_m = 1.1 * (u.sum() + b.sum())
+        big_m = dln_system(a, b, c)[3]
         n_vars = a.shape[0] + a.shape[1] + 1
         res[tid] = math.log(n_vars) * c.max() * big_m / max(1.0, abs(files.loc[tid, "fstar"]))
     return pd.Series(res)
 
 
-def lambda_study(grid: pd.DataFrame, out: Path, data: Path | None, manifest: pd.DataFrame | None) -> None:
+def dln_system(a: np.ndarray, b: np.ndarray, c: np.ndarray):
+    """The reduced system DlnSolver builds (src/LpBench.Core/DlnSolver.cs): returns Â, b̂, normalized costs, M."""
+    m, n = a.shape
+    a_std = np.hstack([a, np.eye(m)])
+    c_std = np.concatenate([-c, np.zeros(m)])
+    with np.errstate(divide="ignore"):
+        u = np.where(a_std > 0, b[:, None] / np.where(a_std > 0, a_std, 1), np.inf).min(axis=0)
+    big_m = 1.1 * min(u.sum(), max(1.0, 1.0 / a_std.sum(axis=0).min()) * b.sum())
+    n_std = n + m
+    a_hat = np.zeros((m + 1, n_std + 1))
+    a_hat[:m, :n_std] = a_std
+    a_hat[m, :] = 1.0
+    b_hat = np.concatenate([b / big_m, [1.0]])
+    norms = np.linalg.norm(a_hat, axis=1)
+    a_hat /= norms[:, None]
+    b_hat /= norms
+    cc = np.concatenate([c_std, [0.0]])
+    cost = (cc - cc.min()) / (cc.max() - cc.min())
+    return a_hat, b_hat, cost, big_m
+
+
+def entropic_gap(a: np.ndarray, b: np.ndarray, c: np.ndarray, fstar: float, lam: float) -> float:
+    """Relative gap of the exact solution of min ĉᵀx + λΣ(x ln x − x), Âx = b̂ (the limit in Theorem 2.2),
+    via the smooth dual max_μ b̂ᵀμ − λΣexp((Âᵀμ − ĉ)/λ). NaN when the dual solver does not reach feasibility."""
+    from scipy.optimize import minimize
+
+    a_hat, b_hat, cost, big_m = dln_system(a, b, c)
+
+    def f(mu: np.ndarray):
+        x = np.exp(np.minimum((a_hat.T @ mu - cost) / lam, 700.0))
+        return -(b_hat @ mu - lam * x.sum()), -(b_hat - a_hat @ x)
+
+    r = minimize(f, np.zeros(len(b_hat)), jac=True, method="L-BFGS-B",
+                 options={"maxiter": 50000, "maxfun": 100000, "gtol": 1e-13, "ftol": 1e-16})
+    x = np.exp(np.minimum((a_hat.T @ r.x - cost) / lam, 700.0))
+    if np.linalg.norm(a_hat @ x - b_hat) / np.linalg.norm(b_hat) > 1e-6:
+        return float("nan")
+    n = a.shape[1]
+    return abs(c @ (big_m * x[:n]) - fstar) / max(1.0, abs(fstar))
+
+
+def lambda_study(grid: pd.DataFrame, out: Path, data: Path | None, manifest: pd.DataFrame | None,
+                 entropic_tasks: int = 5) -> None:
     grid = grid.copy()
     grid["solved"] = grid["status"] == "Solved"
     if data is not None and manifest is not None and (data / manifest["file"].iloc[0]).exists():
@@ -185,6 +225,23 @@ def lambda_study(grid: pd.DataFrame, out: Path, data: Path | None, manifest: pd.
         time_median=("time_ms", "median"), bound_median=("bound", "median")).reset_index()
     s.to_csv(out / "lambda_summary.csv", index=False)
 
+    ent = pd.DataFrame()
+    if data is not None and manifest is not None and entropic_tasks > 0:
+        files = manifest.set_index("id")
+        rows = []
+        for (cls, st), x in grid[grid["structure"] == "dense"].groupby(["class", "structure"]):
+            for tid in sorted(x["task_id"].unique())[:entropic_tasks]:
+                path = data / files.loc[tid, "file"]
+                if not path.exists():
+                    continue
+                a, b, c = read_lpb(path)
+                for lam in sorted(grid["lambda"].unique()):
+                    rows.append({"class": cls, "structure": st, "task_id": tid, "lambda": lam,
+                                 "gap": entropic_gap(a, b, c, float(files.loc[tid, "fstar"]), lam)})
+        if rows:
+            ent = pd.DataFrame(rows)
+            ent.to_csv(out / "lambda_entropic.csv", index=False)
+
     classes = [c for c in CLASS_ORDER if c in set(s["class"])]
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8))
     colors = {"S": "#1f77b4", "M": "#d62728", "L": "#2ca02c"}
@@ -196,6 +253,11 @@ def lambda_study(grid: pd.DataFrame, out: Path, data: Path | None, manifest: pd.
         axes[0].plot(x["lambda"], x["gap_median"].clip(lower=1e-16), ls, marker=markers.get(st, "o"), ms=4,
                      color=colors.get(cls, "k"), label=lab)
         axes[1].plot(x["lambda"], x["iter_median"], ls, marker=markers.get(st, "o"), ms=4, color=colors.get(cls, "k"), label=lab)
+    if len(ent):
+        for cls, x in ent.groupby("class"):
+            med = x.groupby("lambda")["gap"].median().dropna()
+            axes[0].plot(med.index, med.values.clip(1e-16), "x", ms=6, mew=1.5, color=colors.get(cls, "k"),
+                         label=f"{cls}: точное решение (2.8)")
     if s["bound_median"].notna().any():
         b = s[(s["structure"] == "dense") & (s["mode"] == "plain")].groupby("lambda")["bound_median"].median()
         axes[0].plot(b.index, b.values, "k:", lw=1, label="оценка λ·ln N·c̄M/f*")

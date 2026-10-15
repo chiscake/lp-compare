@@ -3,14 +3,14 @@
   Full pipeline on Windows: generate instances, test, publish Native AOT, benchmark, analyze.
 
 .EXAMPLE
-  .\scripts\run.ps1                       # quick profile (~10–20 min): ILL + S + M, fewer tasks
-  .\scripts\run.ps1 -Profile full         # everything from experiments\params.ini (hours)
-  .\scripts\run.ps1 -Isa x86-x64-v3       # instruction set for Native AOT (default: native)
+  .\scripts\run.ps1                       # quick mode (~10–20 min): ILL + S + M, fewer tasks
+  .\scripts\run.ps1 -Mode full             # everything from experiments\params.ini (hours)
+  .\scripts\run.ps1 -Isa x86-64-v3       # instruction set for Native AOT (default: native)
   .\scripts\run.ps1 -NoAot                # JIT build if the C++ build tools for AOT are missing
   .\scripts\run.ps1 -Label my-pc          # results\<label>\ (default: computer name)
 #>
 param(
-    [ValidateSet("quick", "full")] [string] $Profile = "quick",
+    [ValidateSet("quick", "full")] [string] $Mode = "quick",
     [string] $Isa = "native",
     [switch] $NoAot,
     [string] $Label = $env:COMPUTERNAME,
@@ -30,7 +30,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw "uv not found: 
 
 $out = Join-Path "results" $Label
 New-Item -ItemType Directory -Force $out | Out-Null
-if ($Profile -eq "quick") { $classes = "ILL,S,M"; $runClasses = "S,M"; $maxTasks = 10; $repeats = "3"; $lambdaTasks = 5 }
+if ($Mode -eq "quick") { $classes = "ILL,S,M"; $runClasses = "S,M"; $maxTasks = 10; $repeats = "3"; $lambdaTasks = 5 }
 else { $classes = ""; $runClasses = ""; $maxTasks = 0; $repeats = ""; $lambdaTasks = 20 }
 
 Write-Host "== 1/6 instances (seeded; hashes checked against experiments\manifest.csv)"

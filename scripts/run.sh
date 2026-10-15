@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 # Full pipeline on Linux/macOS: generate instances, test, publish Native AOT, benchmark, analyze.
 #
-#   scripts/run.sh                      # quick profile (~10–20 min): ILL + S + M, fewer tasks
-#   scripts/run.sh --profile full       # everything from experiments/params.ini (hours)
-#   scripts/run.sh --isa x86-x64-v3     # instruction set for Native AOT (default: native)
+#   scripts/run.sh                      # quick mode (~10–20 min): ILL + S + M, fewer tasks
+#   scripts/run.sh --mode full          # everything from experiments/params.ini (hours)
+#   scripts/run.sh --isa x86-64-v3     # instruction set for Native AOT (default: native)
 #   scripts/run.sh --no-aot             # JIT build if the AOT toolchain (clang/Xcode) is missing
 #   scripts/run.sh --label my-laptop    # results/<label>/ (default: host name)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PROFILE=quick
+MODE=quick
 ISA=native
 AOT=1
 LABEL="$(hostname -s 2>/dev/null || hostname)"
 SKIP_TESTS=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --profile) PROFILE="$2"; shift 2 ;;
+    --mode) MODE="$2"; shift 2 ;;
     --isa) ISA="$2"; shift 2 ;;
     --no-aot) AOT=0; shift ;;
     --label) LABEL="$2"; shift 2 ;;
@@ -31,10 +31,10 @@ command -v uv >/dev/null || { echo "uv not found (https://docs.astral.sh/uv/gett
 
 OUT="results/$LABEL"
 mkdir -p "$OUT"
-case "$PROFILE" in
+case "$MODE" in
   quick) CLASSES="ILL,S,M"; RUN_CLASSES="S,M"; MAX_TASKS=10; REPEATS=3; LAMBDA_TASKS=5 ;;
   full)  CLASSES="";        RUN_CLASSES="";    MAX_TASKS=0;  REPEATS="";  LAMBDA_TASKS=20 ;;
-  *) echo "profile must be quick or full" >&2; exit 2 ;;
+  *) echo "mode must be quick or full" >&2; exit 2 ;;
 esac
 
 echo "== 1/6 instances (seeded; hashes checked against experiments/manifest.csv)"
@@ -53,7 +53,7 @@ case "$(uname -s)-$(uname -m)" in
 esac
 if [[ $AOT -eq 1 ]]; then
   ISA_ARG=(); [[ -n "$ISA" ]] && ISA_ARG=(-p:LpIsa="$ISA")
-  dotnet publish src/LpBench.Cli -c Release -r "$RID" "${ISA_ARG[@]}" -o "artifacts/$RID" --nologo -v q
+  dotnet publish src/LpBench.Cli -c Release -r "$RID" ${ISA_ARG[@]+"${ISA_ARG[@]}"} -o "artifacts/$RID" --nologo -v q
   BIN="artifacts/$RID/lpbench"
 else
   dotnet build src/LpBench.Cli -c Release --nologo -v q
