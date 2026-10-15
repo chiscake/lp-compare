@@ -264,7 +264,7 @@ def lambda_study(grid: pd.DataFrame, out: Path, data: Path | None, manifest: pd.
         for cls, x in ent.groupby("class"):
             med = x.groupby("lambda")["gap"].median().dropna()
             axes[0].plot(med.index, med.values.clip(1e-16), "x", ms=6, mew=1.5, color=colors.get(cls, "k"),
-                         label=f"{cls}: точное решение (2.8)")
+                         label=f"{cls}: точный энтропийный предел")
     if s["bound_median"].notna().any():
         b = s[(s["structure"] == "dense") & (s["mode"] == "plain")].groupby("lambda")["bound_median"].median()
         axes[0].plot(b.index, b.values, "k:", lw=1, label="оценка λ·ln N·c̄M/f*")
