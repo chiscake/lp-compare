@@ -104,15 +104,22 @@ def summary_markdown(s: pd.DataFrame) -> str:
 def validation_markdown(t: pd.DataFrame) -> str:
     out = ["# Валидация", ""]
     simplex = t[t["method"].isin(["dantzig", "bland"])]
-    worst = simplex["gap"].max() if len(simplex) else float("nan")
-    not_solved = simplex[~simplex["solved"]]
-    out.append(f"- Симплекс (оба правила), задач: {simplex['task_id'].nunique()}; максимальный относительный зазор с HiGHS: "
-               f"{worst:.2e} (допуск 1e-9) — {'OK' if worst <= 1e-9 else 'ОШИБКА'}.")
-    out.append(f"- Не решены симплексом: {len(not_solved)}" + (f" ({', '.join(not_solved['task_id'].head(10))})" if len(not_solved) else "") + ".")
-    piv = simplex.pivot_table(index="task_id", columns="method", values="objective")
+    solved = simplex[simplex["solved"]]
+    worst = solved["gap"].max() if len(solved) else float("nan")
+    out.append(f"- Симплекс (оба правила), задач: {simplex['task_id'].nunique()}; максимальный относительный зазор с HiGHS "
+               f"по решённым: {worst:.2e} (допуск 1e-9) — {'OK' if worst <= 1e-9 else 'ОШИБКА'}.")
+    for m in ("dantzig", "bland"):
+        ns = simplex[(simplex["method"] == m) & ~simplex["solved"]]
+        if len(ns):
+            st = ", ".join(f"{k}: {v}" for k, v in ns["status"].value_counts().items())
+            out.append(f"- {METHOD_LABEL[m]}: не решено {len(ns)} ({st}); "
+                       f"примеры: {', '.join(ns['task_id'].head(5))}.")
+        else:
+            out.append(f"- {METHOD_LABEL[m]}: решены все задачи.")
+    piv = solved.pivot_table(index="task_id", columns="method", values="objective")
     if {"dantzig", "bland"} <= set(piv.columns):
         diff = ((piv["dantzig"] - piv["bland"]).abs() / piv["dantzig"].abs().clip(lower=1)).max()
-        out.append(f"- Совпадение оптимумов Данцига и Бланда: максимальное относительное расхождение {diff:.2e}.")
+        out.append(f"- Совпадение оптимумов Данцига и Бланда (где решили оба): максимальное относительное расхождение {diff:.2e}.")
     ipm = t[t["method"] == "ipm"]
     if len(ipm):
         out.append(f"- IPM: решено {ipm['solved'].mean():.0%}, зазор max {ipm['gap'].max():.2e}, невязка max {ipm['viol'].max():.2e}.")
@@ -288,6 +295,18 @@ def illustrative_markdown(ill: pd.DataFrame) -> str:
     return "\n".join(lines) + "\n"
 
 
+def with_manifest_fstar(df: pd.DataFrame, manifest: pd.DataFrame | None) -> pd.DataFrame:
+    """Recompute gap against the current manifest, so a refined f* does not require rerunning the solvers."""
+    if manifest is None:
+        return df
+    fstar = df["task_id"].map(manifest.set_index("id")["fstar"])
+    known = fstar.notna()
+    df = df.copy()
+    df.loc[known, "fstar"] = fstar[known]
+    df.loc[known, "gap"] = (df["objective"] - df["fstar"]).abs()[known] / df["fstar"].abs().clip(lower=1.0)[known]
+    return df
+
+
 def main(argv: list[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[2]
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -299,8 +318,9 @@ def main(argv: list[str] | None = None) -> int:
     manifest = pd.read_csv(ns.manifest) if Path(ns.manifest).exists() else None
     done = []
 
-    if (run / "raw.csv").exists():
-        t = per_task(pd.read_csv(run / "raw.csv"))
+    raw_parts = sorted(run.glob("raw*.csv"))
+    if raw_parts:
+        t = per_task(with_manifest_fstar(pd.concat([pd.read_csv(p) for p in raw_parts], ignore_index=True), manifest))
         t.to_csv(run / "per_task.csv", index=False)
         s = summarize(t)
         s.to_csv(run / "summary.csv", index=False)
@@ -309,10 +329,11 @@ def main(argv: list[str] | None = None) -> int:
         fig_time(t, run)
         done += ["per_task.csv", "summary.csv", "summary.md", "validation.md", "fig_time.png/svg"]
     if (run / "lambda.csv").exists():
-        lambda_study(pd.read_csv(run / "lambda.csv"), run, Path(ns.data), manifest)
+        lambda_study(with_manifest_fstar(pd.read_csv(run / "lambda.csv"), manifest), run, Path(ns.data), manifest)
         done += ["lambda_summary.csv", "fig_lambda.png/svg"]
     if (run / "illustrative.csv").exists():
-        (run / "illustrative.md").write_text(illustrative_markdown(pd.read_csv(run / "illustrative.csv")), encoding="utf-8")
+        ill = with_manifest_fstar(pd.read_csv(run / "illustrative.csv"), manifest)
+        (run / "illustrative.md").write_text(illustrative_markdown(ill), encoding="utf-8")
         done.append("illustrative.md")
     if not done:
         print(f"nothing to analyze in {run}", file=sys.stderr)
