@@ -1,0 +1,22 @@
+[project]
+name = "lpbench-py"
+version = "0.1.0"
+description = "Instance generator, HiGHS reference values and result analysis for the LP methods benchmark"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "numpy==2.3.3",
+    "scipy==1.16.2",
+    "matplotlib==3.10.6",
+    "pandas==2.3.3",
+]
+
+[project.scripts]
+lpgen = "lpbench_py.generate:main"
+lpanalyze = "lpbench_py.analyze:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lpbench_py"]

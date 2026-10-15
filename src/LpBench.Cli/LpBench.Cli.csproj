@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>lpbench</AssemblyName>
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <StripSymbols>true</StripSymbols>
+  </PropertyGroup>
+
+  <!--
+    LpIsa sets the Native AOT target instruction set, e.g.
+      dotnet publish -c Release -r win-x64 -p:LpIsa=native
+      dotnet publish -c Release -r linux-x64 -p:LpIsa=x86-x64-v3
+    Empty = the compiler's conservative baseline for the RID (portable, Vector<double> is 128-bit on x64).
+    "native" only runs on CPUs with the same instruction sets as the build machine.
+  -->
+  <PropertyGroup Condition="'$(LpIsa)' != ''">
+    <IlcInstructionSet>$(LpIsa)</IlcInstructionSet>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LpBench.Core\LpBench.Core.csproj" />
+  </ItemGroup>
+
+</Project>

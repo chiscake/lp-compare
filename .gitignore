@@ -1,0 +1,9 @@
+data/
+bin/
+obj/
+.venv/
+__pycache__/
+*.pyc
+artifacts/
+agent-tools/
+TestResults/

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LpBench.Cli/LpBench.Cli.csproj" />
+    <Project Path="src/LpBench.Core/LpBench.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LpBench.Tests/LpBench.Tests.csproj" />
+  </Folder>
+</Solution>
