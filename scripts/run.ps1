@@ -13,7 +13,7 @@ param(
     [ValidateSet("quick", "full")] [string] $Mode = "quick",
     [string] $Isa = "native",
     [switch] $NoAot,
-    [string] $Label = $env:COMPUTERNAME,
+    [string] $Label = [Environment]::MachineName,
     [switch] $SkipTests
 )
 $ErrorActionPreference = "Stop"
@@ -43,16 +43,21 @@ if (-not $SkipTests) {
 }
 
 Write-Host "== 3/6 build"
-$rid = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq "Arm64") { "win-arm64" } else { "win-x64" }
+# Windows PowerShell 5.1 has no $IsWindows; PowerShell 7 on Linux/macOS sets $IsLinux / $IsMacOS.
+$onWindows = -not (Test-Path variable:IsWindows) -or $IsWindows
+$os = if ($onWindows) { "win" } elseif ($IsMacOS) { "osx" } else { "linux" }
+$cpu = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq "Arm64") { "arm64" } else { "x64" }
+$rid = "$os-$cpu"
+$exe = if ($onWindows) { ".exe" } else { "" }
 if (-not $NoAot) {
     $publishArgs = @("publish", "src/LpBench.Cli", "-c", "Release", "-r", $rid, "-o", "artifacts/$rid", "--nologo", "-v", "q")
     if ($Isa) { $publishArgs += "-p:LpIsa=$Isa" }
     Invoke-Checked dotnet $publishArgs
-    $bin = "artifacts/$rid/lpbench.exe"
+    $bin = "artifacts/$rid/lpbench$exe"
 }
 else {
     Invoke-Checked dotnet @("build", "src/LpBench.Cli", "-c", "Release", "--nologo", "-v", "q")
-    $bin = "src/LpBench.Cli/bin/Release/net10.0/lpbench.exe"
+    $bin = "src/LpBench.Cli/bin/Release/net10.0/lpbench$exe"
 }
 
 Write-Host "== 4/6 environment -> $out\env.txt"
