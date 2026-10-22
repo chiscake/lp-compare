@@ -4,12 +4,12 @@
 
 ## Версии
 
-| Компонент | Версия |
-|---|---|
-| .NET SDK / рантайм | 10.0.402 / 10.0.13 (`global.json`: 10.0.100, rollForward latestFeature) |
-| Сборка | Native AOT, `OptimizationPreference=Speed`, `InvariantGlobalization`, `IlcInstructionSet` = `-p:LpIsa=...` |
-| Python / uv | 3.12 / 0.13 (`python/uv.lock`) |
-| numpy / scipy (HiGHS) / pandas / matplotlib | 2.3.3 / 1.16.2 / 2.3.3 / 3.10.6 |
+| Компонент                                   | Версия                                                                                                     |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| .NET SDK / рантайм                          | 10.0.402 / 10.0.13 (`global.json`: 10.0.100, rollForward latestFeature)                                    |
+| Сборка                                      | Native AOT, `OptimizationPreference=Speed`, `InvariantGlobalization`, `IlcInstructionSet` = `-p:LpIsa=...` |
+| Python / uv                                 | 3.12 / 0.13 (`python/uv.lock`)                                                                             |
+| numpy / scipy (HiGHS) / pandas / matplotlib | 2.3.3 / 1.16.2 / 2.3.3 / 3.10.6                                                                            |
 
 ## Задачи
 
