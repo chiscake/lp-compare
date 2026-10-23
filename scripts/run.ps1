@@ -70,11 +70,28 @@ if ($runClasses) { $runArgs += @("--classes", $runClasses) }
 if ($maxTasks -gt 0) { $runArgs += @("--max-tasks", "$maxTasks") }
 if ($repeats) { $runArgs += @("--repeats", $repeats) }
 Invoke-Checked $bin $runArgs
-$lambdas = ((Get-Content experiments/params.ini | Where-Object { $_ -match '^lambda_study.lambdas' }) -split '=')[1].Trim() -replace '\s', ''
+function Get-Param([string] $Key) {
+    ((Get-Content experiments/params.ini | Where-Object { $_ -match "^$([regex]::Escape($Key))\s*=" }) -split '=')[1].Trim() -replace '\s', ''
+}
+$traceArgs = @("trace", "--set", "main", "--methods", "dln,dln-log", "--out", "$out/trace.csv")
+if ($runClasses) { $traceArgs += @("--classes", $runClasses) }
+if ($maxTasks -gt 0) { $traceArgs += @("--max-tasks", "$maxTasks") }
+Invoke-Checked $bin $traceArgs
+$highsArgs = @("run", "--project", "python", "lphighs", "--out", "$out/highs.csv")
+if ($runClasses) { $highsArgs += @("--classes", $runClasses) }
+Invoke-Checked uv $highsArgs
+$lambdas = Get-Param "lambda_study.lambdas"
 Invoke-Checked $bin @("grid", "--set", "main", "--classes", "S,M", "--structures", "dense,degenerate",
-    "--max-tasks", "$lambdaTasks", "--lambdas", $lambdas, "--out", "$out/lambda.csv")
-$kappas = ((Get-Content experiments/params.ini | Where-Object { $_ -match '^kappa_study.kappas' }) -split '=')[1].Trim() -replace '\s', ''
-$lamS = ((Get-Content experiments/params.ini | Where-Object { $_ -match '^dln.lambda.S' }) -split '=')[1].Trim()
+    "--max-tasks", "$lambdaTasks", "--lambdas", $lambdas, "--modes", "plain,log", "--out", "$out/lambda.csv")
+if ($Mode -eq "full") {
+    Invoke-Checked $bin @("grid", "--set", "main", "--classes", "L", "--structures", "dense,degenerate",
+        "--max-tasks", "5", "--lambdas", $lambdas, "--modes", "plain,log", "--out", "$out/lambda_large.csv")
+    Invoke-Checked $bin @("grid", "--set", "main", "--classes", "M", "--structures", "dense", "--max-tasks", "10",
+        "--lambdas", (Get-Param "long_study.lambdas"), "--modes", "plain,log", "--max-iter", (Get-Param "long_study.max_iter"),
+        "--out", "$out/lambda_long.csv")
+}
+$kappas = Get-Param "kappa_study.kappas"
+$lamS = Get-Param "dln.lambda.S"
 Invoke-Checked $bin @("grid", "--set", "main", "--classes", "S", "--lambdas", $lamS, "--kappas", $kappas, "--out", "$out/kappa.csv")
 Invoke-Checked $bin @("grid", "--set", "illustrative", "--lambdas", $lamS, "--kappas", $kappas, "--out", "$out/kappa_illustrative.csv")
 

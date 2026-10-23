@@ -70,13 +70,27 @@ RUN_ARGS=(--set main --out "$OUT/raw.csv")
 [[ $MAX_TASKS -gt 0 ]] && RUN_ARGS+=(--max-tasks "$MAX_TASKS")
 [[ -n "$REPEATS" ]] && RUN_ARGS+=(--repeats "$REPEATS")
 "$BIN" run "${RUN_ARGS[@]}"
+TRACE_ARGS=(--set main --methods dln,dln-log --out "$OUT/trace.csv")
+[[ -n "$RUN_CLASSES" ]] && TRACE_ARGS+=(--classes "$RUN_CLASSES")
+[[ $MAX_TASKS -gt 0 ]] && TRACE_ARGS+=(--max-tasks "$MAX_TASKS")
+"$BIN" trace "${TRACE_ARGS[@]}"
+HIGHS_ARGS=(--out "$OUT/highs.csv")
+[[ -n "$RUN_CLASSES" ]] && HIGHS_ARGS+=(--classes "$RUN_CLASSES")
+uv run --project python lphighs "${HIGHS_ARGS[@]}"
+param() { grep -E "^$1 *=" experiments/params.ini | cut -d= -f2 | tr -d ' '; }
+LAMBDAS="$(param lambda_study.lambdas)"
 "$BIN" grid --set main --classes S,M --structures dense,degenerate --max-tasks "$LAMBDA_TASKS" \
-  --lambdas "$(grep -E '^lambda_study.lambdas' experiments/params.ini | cut -d= -f2 | tr -d ' ')" \
-  --out "$OUT/lambda.csv"
-KAPPAS="$(grep -E '^kappa_study.kappas' experiments/params.ini | cut -d= -f2 | tr -d ' ')"
-"$BIN" grid --set main --classes S --lambdas "$(grep -E '^dln.lambda.S' experiments/params.ini | cut -d= -f2 | tr -d ' ')" \
+  --lambdas "$LAMBDAS" --modes plain,log --out "$OUT/lambda.csv"
+if [[ "$MODE" == full ]]; then
+  "$BIN" grid --set main --classes L --structures dense,degenerate --max-tasks 5 \
+    --lambdas "$LAMBDAS" --modes plain,log --out "$OUT/lambda_large.csv"
+  "$BIN" grid --set main --classes M --structures dense --max-tasks 10 --lambdas "$(param long_study.lambdas)" \
+    --modes plain,log --max-iter "$(param long_study.max_iter)" --out "$OUT/lambda_long.csv"
+fi
+KAPPAS="$(param kappa_study.kappas)"
+"$BIN" grid --set main --classes S --lambdas "$(param dln.lambda.S)" \
   --kappas "$KAPPAS" --out "$OUT/kappa.csv"
-"$BIN" grid --set illustrative --lambdas "$(grep -E '^dln.lambda.S' experiments/params.ini | cut -d= -f2 | tr -d ' ')" \
+"$BIN" grid --set illustrative --lambdas "$(param dln.lambda.S)" \
   --kappas "$KAPPAS" --out "$OUT/kappa_illustrative.csv"
 
 echo "== 6/6 analysis"

@@ -6,7 +6,12 @@ Usage (from the repository root):
 Reads from the run directory (whatever exists):
     raw.csv          timed runs: lpbench run          -> summary.csv, summary.md, validation.md, fig_time.*
     lambda.csv       λ study:    lpbench grid         -> lambda_summary.csv, fig_lambda.*
+    lambda_large.csv λ study on L (optional, merged with lambda.csv)
+    lambda_long.csv  long log-domain runs below the double window -> lambda_long.md
     kappa.csv        κ study:    lpbench grid --kappas -> kappa.md
+    highs.csv        HiGHS timings (lphighs), merged with raw*.csv
+    trace.csv        DLN trajectories (lpbench trace) -> time_to_target.csv, quality.md
+    (raw*.csv + data) exact λ-regularized optimum per DLN task -> entropic_main.csv, dln_decomposition.md
     illustrative.csv illustrative problem (lpbench run --set illustrative) -> illustrative.md
 """
 
@@ -25,9 +30,12 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-METHOD_ORDER = ["dantzig", "bland", "ipm", "dln", "dln-log"]
+METHOD_ORDER = ["dantzig", "bland", "ipm", "dln", "dln-log", "highs-ds", "highs-ipm"]
 METHOD_LABEL = {"dantzig": "Симплекс (Данциг)", "bland": "Симплекс (Бланд)", "ipm": "IPM (Мехротра)",
-                "dln": "DLN", "dln-log": "DLN (log)"}
+                "dln": "DLN", "dln-log": "DLN (log)", "highs-ds": "HiGHS (двойств. симплекс)",
+                "highs-ipm": "HiGHS (IPM + crossover)"}
+GAP_TARGETS = (1e-3, 1e-6, 1e-8)
+FEAS_TOL = 1e-6
 CLASS_ORDER = ["ILL", "S", "M", "L", "XL"]
 STRUCT_ORDER = ["illustrative", "dense", "sparse", "degenerate"]
 STRUCT_LABEL = {"dense": "плотные", "sparse": "разреженные", "degenerate": "вырожденные", "illustrative": "пример"}
@@ -57,7 +65,10 @@ def per_task(raw: pd.DataFrame) -> pd.DataFrame:
     first = timed[timed["repeat"] == 1].set_index(["task_id", "method"])
     med = timed.groupby(["task_id", "method"])["time_ms"].median().rename("time_ms_median")
     n_rep = timed.groupby(["task_id", "method"])["time_ms"].size().rename("repeats_done")
-    t = first.drop(columns=["time_ms", "repeat"]).join(med).join(n_rep).reset_index()
+    t_min = timed.groupby(["task_id", "method"])["time_ms"].min().rename("time_ms_min")
+    t_max = timed.groupby(["task_id", "method"])["time_ms"].max().rename("time_ms_max")
+    t = first.drop(columns=["time_ms", "repeat"]).join(med).join(n_rep).join(t_min).join(t_max).reset_index()
+    t["time_spread"] = np.where(t["repeats_done"] > 1, (t["time_ms_max"] - t["time_ms_min"]) / t["time_ms_median"], np.nan)
     t["solved"] = t["status"] == "Solved"
     t["degenerate_share"] = np.where(t["iterations"] > 0, t["degenerate_pivots"] / t["iterations"].clip(lower=1), np.nan)
     return t
@@ -75,6 +86,8 @@ def summarize(t: pd.DataFrame) -> pd.DataFrame:
         gap_median=("gap", "median"), gap_p90=("gap", q(0.9)), gap_max=("gap", "max"),
         viol_median=("viol", "median"), viol_max=("viol", "max"),
         degenerate_share_median=("degenerate_share", "median"),
+        repeats=("repeats_done", "median"), time_spread_median=("time_spread", "median"),
+        time_spread_max=("time_spread", "max"),
     ).reset_index()
     s["class"] = pd.Categorical(s["class"], CLASS_ORDER, ordered=True)
     s["structure"] = pd.Categorical(s["structure"], STRUCT_ORDER, ordered=True)
@@ -86,16 +99,17 @@ def summary_markdown(s: pd.DataFrame) -> str:
     lines = ["# Сводка по классам и методам", "",
              "Время — медиана из повторов для каждой задачи, затем min / медиана / p90 / max по задачам (мс). "
              "Итерации между методами не сравниваются. «Решено» — доля задач, где выполнен критерий остановки "
-             "метода в пределах лимитов.", ""]
+             "метода в пределах лимитов. Разброс — (max − min)/медиана по повторам одной задачи, медиана (max) по задачам.", ""]
     for (cls, st), x in s.groupby(["class", "structure"], observed=True):
         lines += [f"## {cls}, {STRUCT_LABEL.get(st, st)}", "",
-                  "| Метод | Задач | Решено | Время min / med / p90 / max, мс | Итерации med (p90) | Вырожд. пивоты | Зазор med / max | Невязка max |",
-                  "|---|---|---|---|---|---|---|---|"]
+                  "| Метод | Задач | Решено | Время min / med / p90 / max, мс | Повторов | Разброс | Итерации med (p90) | Вырожд. пивоты | Зазор med / max | Невязка max |",
+                  "|---|---|---|---|---|---|---|---|---|---|"]
         for _, r in x.iterrows():
             deg = fmt(r.degenerate_share_median, "share") if r.method in ("dantzig", "bland") else "—"
             lines.append(
                 f"| {METHOD_LABEL.get(r.method, r.method)} | {r.tasks} | {fmt(r.solved, 'share')} | "
                 f"{fmt(r.time_min, 'time')} / {fmt(r.time_median, 'time')} / {fmt(r.time_p90, 'time')} / {fmt(r.time_max, 'time')} | "
+                f"{fmt(r.repeats, 'int')} | {fmt(r.time_spread_median, 'share')} ({fmt(r.time_spread_max, 'share')}) | "
                 f"{fmt(r.iter_median, 'int')} ({fmt(r.iter_p90, 'int')}) | {deg} | "
                 f"{fmt(r.gap_median, 'e')} / {fmt(r.gap_max, 'e')} | {fmt(r.viol_max, 'e')} |")
         lines.append("")
@@ -196,21 +210,53 @@ def dln_system(a: np.ndarray, b: np.ndarray, c: np.ndarray):
     return a_hat, b_hat, cost, big_m
 
 
+def entropic_solution(a_hat: np.ndarray, b_hat: np.ndarray, cost: np.ndarray, lam: float,
+                      tol: float = 1e-10, max_iter: int = 2000,
+                      max_log_change: float = 10.0) -> tuple[np.ndarray, float]:
+    """Exact minimizer of ĉᵀx + λΣ(x ln x − x), Âx = b̂ (the λ-limit of DLN, Theorem 2.2 of [1]) by damped Newton on
+    the smooth concave dual g(μ) = b̂ᵀμ − λΣexp((Âᵀμ − ĉ)/λ), x(μ) = exp((Âᵀμ − ĉ)/λ). The Hessian is nearly singular
+    while most xⱼ are tiny, so each step changes ln xⱼ by at most max_log_change. Returns x and its relative residual."""
+    def primal(mu: np.ndarray) -> np.ndarray:
+        return np.exp(np.minimum((a_hat.T @ mu - cost) / lam, 700.0))
+
+    nb = np.linalg.norm(b_hat)
+    mu = np.zeros(len(b_hat))
+    x = primal(mu)
+    g_val = b_hat @ mu - lam * x.sum()
+    for _ in range(max_iter):
+        grad = b_hat - a_hat @ x
+        res = np.linalg.norm(grad) / nb
+        if res <= tol:
+            break
+        hess = (a_hat * x) @ a_hat.T / lam
+        hess[np.diag_indices_from(hess)] += 1e-12 * max(1e-300, np.trace(hess) / len(hess))
+        try:
+            step = np.linalg.solve(hess, grad)
+        except np.linalg.LinAlgError:
+            step = np.linalg.lstsq(hess, grad, rcond=None)[0]
+        change = np.abs(a_hat.T @ step).max() / lam
+        if change > max_log_change:
+            step *= max_log_change / change
+        slope = grad @ step
+        t = 1.0
+        while t > 1e-12:
+            mu_t = mu + t * step
+            x_t = primal(mu_t)
+            g_t = b_hat @ mu_t - lam * x_t.sum()
+            if g_t >= g_val + 1e-4 * t * slope:
+                break
+            t *= 0.5
+        if t <= 1e-12:
+            break
+        mu, x, g_val = mu_t, x_t, g_t
+    return x, float(np.linalg.norm(b_hat - a_hat @ x) / nb)
+
+
 def entropic_gap(a: np.ndarray, b: np.ndarray, c: np.ndarray, fstar: float, lam: float) -> float:
-    """Relative gap of the exact solution of min ĉᵀx + λΣ(x ln x − x), Âx = b̂ (the limit in Theorem 2.2),
-    via the smooth dual max_μ b̂ᵀμ − λΣexp((Âᵀμ − ĉ)/λ). NaN when the dual solver does not reach feasibility."""
-    from scipy.optimize import minimize
-
+    """Relative gap of the exact λ-regularized solution; NaN when the dual Newton method does not reach feasibility."""
     a_hat, b_hat, cost, big_m = dln_system(a, b, c)
-
-    def f(mu: np.ndarray):
-        x = np.exp(np.minimum((a_hat.T @ mu - cost) / lam, 700.0))
-        return -(b_hat @ mu - lam * x.sum()), -(b_hat - a_hat @ x)
-
-    r = minimize(f, np.zeros(len(b_hat)), jac=True, method="L-BFGS-B",
-                 options={"maxiter": 50000, "maxfun": 100000, "gtol": 1e-13, "ftol": 1e-16})
-    x = np.exp(np.minimum((a_hat.T @ r.x - cost) / lam, 700.0))
-    if np.linalg.norm(a_hat @ x - b_hat) / np.linalg.norm(b_hat) > 1e-6:
+    x, res = entropic_solution(a_hat, b_hat, cost, lam)
+    if res > 1e-8:
         return float("nan")
     n = a.shape[1]
     return abs(c @ (big_m * x[:n]) - fstar) / max(1.0, abs(fstar))
@@ -252,7 +298,7 @@ def lambda_study(grid: pd.DataFrame, out: Path, data: Path | None, manifest: pd.
 
     classes = [c for c in CLASS_ORDER if c in set(s["class"])]
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8))
-    colors = {"S": "#1f77b4", "M": "#d62728", "L": "#2ca02c"}
+    colors = {"S": "#1f77b4", "M": "#d62728", "L": "#2ca02c", "XL": "#9467bd"}
     markers = {"dense": "o", "degenerate": "s", "sparse": "^"}
     for (cls, st, mode, kappa), x in s.groupby(["class", "structure", "mode", "kappa"]):
         x = x.sort_values("lambda")
@@ -296,6 +342,31 @@ def illustrative_markdown(ill: pd.DataFrame) -> str:
     return "\n".join(lines) + "\n"
 
 
+def long_markdown(grid: pd.DataFrame, data: Path, manifest: pd.DataFrame | None) -> str:
+    g = grid.copy()
+    g["solved"] = g["status"] == "Solved"
+    files = manifest.set_index("id") if manifest is not None else None
+    ent = []
+    for r in g.itertuples(index=False):
+        path = data / files.loc[r.task_id, "file"] if files is not None else None
+        if path is None or not path.exists():
+            ent.append(np.nan)
+            continue
+        a, b, c = read_lpb(path)
+        ent.append(entropic_gap(a, b, c, float(files.loc[r.task_id, "fstar"]), r[g.columns.get_loc("lambda")]))
+    g["entropic_gap"] = ent
+    lines = ["# Длинные прогоны DLN ниже окна double", "",
+             "Класс M, плотные задачи, κ = рабочее значение; лимит итераций задан `--max-iter`, без ограничения по времени. "
+             "Точный предел — зазор точного решения регуляризованной задачи при том же λ.", "",
+             "| Режим | λ | Задач | Решено | Зазор: медиана | p90 | Точный предел: медиана | Невязка: медиана | Итерации, медиана | Время, с |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
+    for (mode, lam), x in g.groupby(["mode", "lambda"]):
+        lines.append(f"| {mode} | {lam:g} | {len(x)} | {fmt(x['solved'].mean(), 'share')} | {fmt(x['gap'].median(), 'e')} | "
+                     f"{fmt(x['gap'].quantile(.9), 'e')} | {fmt(x['entropic_gap'].median(), 'e')} | {fmt(x['residual'].median(), 'e')} | "
+                     f"{fmt(x['iterations'].median(), 'int')} | {fmt(x['time_ms'].median() / 1000, 'time')} |")
+    return "\n".join(lines) + "\n"
+
+
 def kappa_markdown(grid: pd.DataFrame, ill: pd.DataFrame | None) -> str:
     g = grid.copy()
     g["solved"] = g["status"] == "Solved"
@@ -327,6 +398,117 @@ def dln_accuracy_markdown(t: pd.DataFrame) -> str:
     return "\n".join(lines) + "\n"
 
 
+def read_params(path: Path) -> dict[str, str]:
+    out = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if "=" in line:
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+def entropic_main(t: pd.DataFrame, data: Path, manifest: pd.DataFrame, params: dict[str, str], cache: Path) -> pd.DataFrame:
+    """f_λ (exact λ-regularized optimum at the frozen per-class λ) for every task DLN was run on; cached in `cache`."""
+    tasks = t[t["method"] == "dln"][["task_id", "class", "structure"]].drop_duplicates()
+    done = pd.read_csv(cache) if cache.exists() else pd.DataFrame(columns=["task_id", "lambda", "f_lambda", "residual"])
+    files = manifest.set_index("id")
+    rows = []
+    for r in tasks.itertuples(index=False):
+        lam = float(params.get(f"dln.lambda.{r[1]}", params["dln.lambda"]))
+        hit = done[(done["task_id"] == r.task_id) & np.isclose(done["lambda"].astype(float), lam)]
+        if len(hit):
+            rows.append(hit.iloc[0].to_dict())
+            continue
+        path = data / files.loc[r.task_id, "file"]
+        if not path.exists():
+            continue
+        a, b, c = read_lpb(path)
+        a_hat, b_hat, cost, big_m = dln_system(a, b, c)
+        x, res = entropic_solution(a_hat, b_hat, cost, lam)
+        rows.append({"task_id": r.task_id, "lambda": lam, "f_lambda": float(c @ (big_m * x[:a.shape[1]])), "residual": res})
+        pd.DataFrame(rows).to_csv(cache, index=False)
+    ent = pd.DataFrame(rows)
+    if len(ent):
+        ent.to_csv(cache, index=False)
+    return ent
+
+
+def dln_decomposition_markdown(t: pd.DataFrame, ent: pd.DataFrame) -> str:
+    d = t[t["method"] == "dln"].merge(ent, on="task_id")
+    d = d[d["residual_y"] <= 1e-8] if "residual_y" in d else d
+    denom = d["fstar"].abs().clip(lower=1.0)
+    d["bias"] = (d["f_lambda"] - d["fstar"]).abs() / denom
+    d["opt_err"] = (d["objective"] - d["f_lambda"]).abs() / denom
+    d["class"] = pd.Categorical(d["class"], CLASS_ORDER, ordered=True)
+    d["structure"] = pd.Categorical(d["structure"], STRUCT_ORDER, ordered=True)
+    lines = ["# Разложение ошибки DLN", "",
+             "$f_\\lambda$ — точное решение энтропийно регуляризованной задачи при рабочем λ класса (двойственный метод "
+             "Ньютона, невязка ≤1e-8). Все величины — относительно $\\max(1,|f^\\star|)$: общий зазор $|f_{DLN}-f^\\star|$, "
+             "смещение регуляризации $|f_\\lambda-f^\\star|$, ошибка оптимизации $|f_{DLN}-f_\\lambda|$ (недоитерированность и "
+             "смещение шага κ). Медианы по задачам; «доля смещения» — доля задач, где смещение ≥ ошибки оптимизации.", "",
+             "| Класс | Структура | λ | Задач | Общий зазор | Смещение | Ошибка оптимизации | Доля смещения |",
+             "|---|---|---|---|---|---|---|---|"]
+    for (cls, st), x in d.groupby(["class", "structure"], observed=True):
+        lines.append(f"| {cls} | {STRUCT_LABEL.get(st, st)} | {x['lambda'].iloc[0]:g} | {len(x)} | {fmt(x['gap'].median(), 'e')} | "
+                     f"{fmt(x['bias'].median(), 'e')} | {fmt(x['opt_err'].median(), 'e')} | "
+                     f"{fmt((x['bias'] >= x['opt_err']).mean(), 'share')} |")
+    for cls, x in d.groupby("class", observed=True):
+        lines.append(f"| {cls} | все | {x['lambda'].iloc[0]:g} | {len(x)} | {fmt(x['gap'].median(), 'e')} | "
+                     f"{fmt(x['bias'].median(), 'e')} | {fmt(x['opt_err'].median(), 'e')} | "
+                     f"{fmt((x['bias'] >= x['opt_err']).mean(), 'share')} |")
+    return "\n".join(lines) + "\n"
+
+
+def time_to_target(t: pd.DataFrame, trace: pd.DataFrame | None) -> pd.DataFrame:
+    """Per (task, method, target): time to reach gap ≤ target with violation ≤ FEAS_TOL (NaN = never).
+    Finite methods: their solve time if the final point qualifies. DLN: first traced iterate that qualifies."""
+    rows = []
+    for r in t.itertuples(index=False):
+        if r.method.startswith("dln") and trace is not None:
+            continue
+        feas = not (r.viol > FEAS_TOL) if not pd.isna(r.viol) else r.status == "Solved"
+        for tau in GAP_TARGETS:
+            ok = feas and r.gap <= tau
+            rows.append({"task_id": r.task_id, "class": r[t.columns.get_loc("class")], "structure": r.structure,
+                         "method": r.method, "target": tau, "feasible": feas,
+                         "time_ms": r.time_ms_median if ok else np.nan})
+    if trace is not None:
+        tr = trace.copy()
+        tr["feas"] = tr["viol"] <= FEAS_TOL
+        for (tid, method), x in tr.groupby(["task_id", "method"]):
+            last = x.iloc[-1]
+            for tau in GAP_TARGETS:
+                hit = x[x["feas"] & (x["gap"] <= tau)]
+                rows.append({"task_id": tid, "class": last["class"], "structure": last["structure"], "method": method,
+                             "target": tau, "feasible": bool(last["feas"]),
+                             "time_ms": float(hit["time_ms"].iloc[0]) if len(hit) else np.nan})
+    return pd.DataFrame(rows)
+
+
+def quality_markdown(tt: pd.DataFrame) -> str:
+    tt = tt.copy()
+    tt["class"] = pd.Categorical(tt["class"], CLASS_ORDER, ordered=True)
+    tt["method"] = pd.Categorical(tt["method"], METHOD_ORDER, ordered=True)
+    head = " | ".join(f"≤{tau:.0e}: доля / время" for tau in GAP_TARGETS)
+    lines = ["# Решено с требуемым качеством", "",
+             f"«Допустимо» — относительная невязка ограничений ≤{FEAS_TOL:g} в итоговой точке. Для порога τ задача решена, если "
+             f"зазор ≤τ при невязке ≤{FEAS_TOL:g}; время — медиана по задачам, достигшим порога, мс. Для DLN время до первой "
+             "точки траектории, удовлетворяющей порогу (`lpbench trace`, проверки на итерациях с шагом ×1,12, один замер), "
+             "для остальных — время решения.", "",
+             f"| Класс | Метод | Задач | Допустимо | {head} |", "|---|---|---|---|" + "---|" * len(GAP_TARGETS)]
+    for (cls, method), x in tt.groupby(["class", "method"], observed=True):
+        n_tasks = x["task_id"].nunique()
+        feas = x.drop_duplicates("task_id")["feasible"].mean()
+        cells = []
+        for tau in GAP_TARGETS:
+            y = x[x["target"] == tau]
+            share = y["time_ms"].notna().mean()
+            cells.append(f"{fmt(share, 'share')} / {fmt(y['time_ms'].median(), 'time') if share > 0 else '—'}")
+        lines.append(f"| {cls} | {METHOD_LABEL.get(method, method)} | {n_tasks} | {fmt(feas, 'share')} | {' | '.join(cells)} |")
+    return "\n".join(lines) + "\n"
+
+
 def with_manifest_fstar(df: pd.DataFrame, manifest: pd.DataFrame | None) -> pd.DataFrame:
     """Recompute gap against the current manifest, so a refined f* does not require rerunning the solvers."""
     if manifest is None:
@@ -345,6 +527,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--run", required=True, help="directory with raw.csv / lambda.csv / illustrative.csv")
     ap.add_argument("--data", default=str(root / "data"))
     ap.add_argument("--manifest", default=str(root / "experiments" / "manifest.csv"))
+    ap.add_argument("--no-entropic", action="store_true", help="skip the exact λ-regularized solutions (minutes on L/XL)")
     ns = ap.parse_args(argv)
     run = Path(ns.run)
     manifest = pd.read_csv(ns.manifest) if Path(ns.manifest).exists() else None
@@ -352,8 +535,22 @@ def main(argv: list[str] | None = None) -> int:
 
     raw_parts = sorted(run.glob("raw*.csv"))
     if raw_parts:
-        t = per_task(with_manifest_fstar(pd.concat([pd.read_csv(p) for p in raw_parts], ignore_index=True), manifest))
+        parts = [pd.read_csv(p) for p in raw_parts]
+        if (run / "highs.csv").exists():
+            parts.append(pd.read_csv(run / "highs.csv"))
+        t = per_task(with_manifest_fstar(pd.concat(parts, ignore_index=True), manifest))
         t.to_csv(run / "per_task.csv", index=False)
+        trace = with_manifest_fstar(pd.read_csv(run / "trace.csv"), manifest) if (run / "trace.csv").exists() else None
+        tt = time_to_target(t, trace)
+        tt.to_csv(run / "time_to_target.csv", index=False)
+        (run / "quality.md").write_text(quality_markdown(tt), encoding="utf-8")
+        done += ["time_to_target.csv", "quality.md"]
+        params_path = root / "experiments" / "params.ini"
+        if manifest is not None and (Path(ns.data) / manifest["file"].iloc[0]).exists() and not ns.no_entropic:
+            ent = entropic_main(t, Path(ns.data), manifest, read_params(params_path), run / "entropic_main.csv")
+            if len(ent):
+                (run / "dln_decomposition.md").write_text(dln_decomposition_markdown(t, ent), encoding="utf-8")
+                done += ["entropic_main.csv", "dln_decomposition.md"]
         s = summarize(t)
         s.to_csv(run / "summary.csv", index=False)
         (run / "summary.md").write_text(summary_markdown(s), encoding="utf-8")
@@ -362,8 +559,13 @@ def main(argv: list[str] | None = None) -> int:
         (run / "dln_accuracy.md").write_text(dln_accuracy_markdown(t), encoding="utf-8")
         done += ["per_task.csv", "summary.csv", "summary.md", "validation.md", "dln_accuracy.md", "fig_time.png/svg"]
     if (run / "lambda.csv").exists():
-        lambda_study(with_manifest_fstar(pd.read_csv(run / "lambda.csv"), manifest), run, Path(ns.data), manifest)
+        grids = [pd.read_csv(run / f) for f in ("lambda.csv", "lambda_large.csv") if (run / f).exists()]
+        lambda_study(with_manifest_fstar(pd.concat(grids, ignore_index=True), manifest), run, Path(ns.data), manifest)
         done += ["lambda_summary.csv", "fig_lambda.png/svg"]
+    if (run / "lambda_long.csv").exists():
+        (run / "lambda_long.md").write_text(long_markdown(
+            with_manifest_fstar(pd.read_csv(run / "lambda_long.csv"), manifest), Path(ns.data), manifest), encoding="utf-8")
+        done.append("lambda_long.md")
     if (run / "kappa.csv").exists():
         ki = run / "kappa_illustrative.csv"
         (run / "kappa.md").write_text(kappa_markdown(

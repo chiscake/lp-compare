@@ -20,7 +20,10 @@ Commands:
         [--max-tasks N] [--repeats K] [--warmup W]
   grid  --set NAME --out FILE.csv --lambdas a,b,.. [--kappas a,b,..] [--modes plain,log]
         [--manifest ..] [--data ..] [--params ..] [--classes ..] [--structures ..] [--max-tasks N]
-                                                 One run of DLN per (task, λ, κ, mode); for tuning and the λ study.
+        [--max-iter N]                           One run of DLN per (task, λ, κ, mode); for tuning and the λ study.
+  trace --set NAME --out FILE.csv [--methods dln,dln-log] [--classes ..] [--structures ..] [--max-tasks N]
+                                                 One DLN run per task; gap and violation at geometrically spaced
+                                                 iterations, time excludes the measurements (time-to-target study).
 """;
 
 if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
@@ -38,6 +41,7 @@ try
         "solve" => CmdSolve(opts),
         "run" => CmdRun(opts),
         "grid" => CmdGrid(opts),
+        "trace" => CmdTrace(opts),
         _ => Fail($"Unknown command '{args[0]}'.\n\n{Usage}"),
     };
 }
@@ -193,6 +197,7 @@ static int CmdGrid(Dictionary<string, string> o)
     if (lambdas.Length == 0) throw new ArgumentException("--lambdas is required.");
     var kappas = ListOpt(o, "kappas", []);
     var modes = ListOpt(o, "modes", ["plain"]);
+    int? maxIter = o.TryGetValue("max-iter", out var mx) ? int.Parse(mx, CultureInfo.InvariantCulture) : null;
     var tasks = SelectTasks(o).ToList();
     string outPath = o.TryGetValue("out", out var op) ? op : throw new ArgumentException("--out is required.");
     WriteRunInfo(outPath, p, o);
@@ -212,6 +217,7 @@ static int CmdGrid(Dictionary<string, string> o)
         {
             var solver = SolverFactory.Create("dln", p, e.Class, lambda, kappa, mode == "log");
             var limits = SolverFactory.Limits("dln", p, e.Class, sf.Rows, sf.Cols);
+            if (maxIter is { } mi) limits = new SolverLimits { MaxIterations = mi };
             var sw = Stopwatch.StartNew();
             var res = solver.Solve(sf, limits);
             sw.Stop();
@@ -219,6 +225,46 @@ static int CmdGrid(Dictionary<string, string> o)
             csv.WriteLine(string.Join(',', e.Id, e.Set, e.Class, e.Structure, e.M, e.N, e.Seed, mode, G(lambda), G(kappa),
                 G(sw.Elapsed.TotalMilliseconds), res.Iterations, G(acc.Objective), G(e.FStar), G(acc.Gap), G(acc.Violation),
                 G(acc.RepairedGap), G(res.Residual), res.Status));
+        }
+        Console.Error.WriteLine($"[{t + 1}/{tasks.Count}] {e.Id} done, elapsed {total.Elapsed:hh\\:mm\\:ss}");
+    }
+    return 0;
+}
+
+static int CmdTrace(Dictionary<string, string> o)
+{
+    var p = LoadParams(o);
+    var methods = ListOpt(o, "methods", ["dln"]);
+    var tasks = SelectTasks(o).ToList();
+    string outPath = o.TryGetValue("out", out var op) ? op : throw new ArgumentException("--out is required.");
+    WriteRunInfo(outPath, p, o);
+
+    using var csv = OpenCsv(outPath, "task_id,set,class,structure,m,n,method,iteration,time_ms,objective,fstar,gap,viol");
+    var total = Stopwatch.StartNew();
+    for (int t = 0; t < tasks.Count; t++)
+    {
+        var e = tasks[t];
+        var problem = LoadInstance(o, e);
+        var sf = StandardForm.FromResourceProblem(problem);
+        foreach (var method in methods)
+        {
+            var sw = new Stopwatch();
+            var rows = new List<string>();
+            void Observe(int iter, double[] z)
+            {
+                sw.Stop();
+                var acc = Metrics.Evaluate(problem, z, e.FStar);
+                rows.Add(string.Join(',', e.Id, e.Set, e.Class, e.Structure, e.M, e.N, method, iter,
+                    G(sw.Elapsed.TotalMilliseconds), G(acc.Objective), G(e.FStar), G(acc.Gap), G(acc.Violation)));
+                sw.Start();
+            }
+            var solver = SolverFactory.Create(method, p, e.Class, observer: Observe);
+            var limits = SolverFactory.Limits(method, p, e.Class, sf.Rows, sf.Cols);
+            limits = new SolverLimits { MaxIterations = limits.MaxIterations, TimeLimit = limits.TimeLimit * 4 };
+            sw.Start();
+            solver.Solve(sf, limits);
+            sw.Stop();
+            foreach (var row in rows) csv.WriteLine(row);
         }
         Console.Error.WriteLine($"[{t + 1}/{tasks.Count}] {e.Id} done, elapsed {total.Elapsed:hh\\:mm\\:ss}");
     }
