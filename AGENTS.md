@@ -56,6 +56,8 @@ Quick mode takes ~20 min; full ~6-8 h. `lpbench --help` lists CLI options.
 - Native AOT ISA is set via `-p:LpIsa=` (valid: `native`, `x86-64-v2/v3/v4`, `apple-m1`, ...). `native` binaries are not portable.
 - Cloud timings are reference only (shared VM). Final timings should come from the author's AMD x64 Windows machine, 12 GB RAM.
 - Subnormal doubles are very slow on x86; lambda below ~1.4e-3 hits them, below ~6.7e-4 `u0` underflows to zero.
+- Simplex pivot limit is `50 * (2m + n)` (`simplex.max_iter_factor` times rows+columns of the standard form). Pivot counts on degenerate tasks depend on the exact pivot update (reciprocal scaling, exact zeroing of the pivot column): a naive numpy variant gives 129 instead of 102 pivots on `main_M_degenerate_000`; the C# result is deterministic.
+- DLN kappa study: `kappa.md` (kappa 10 is more accurate than the frozen kappa 30 on S, but defaults are kept to avoid rerunning M/L/XL).
 - Bland hits the pivot limit on some L and most sparse/degenerate XL tasks; `validation.md` checks simplex accuracy on solved tasks only.
 
 ## Conventions

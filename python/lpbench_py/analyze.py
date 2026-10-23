@@ -6,6 +6,7 @@ Usage (from the repository root):
 Reads from the run directory (whatever exists):
     raw.csv          timed runs: lpbench run          -> summary.csv, summary.md, validation.md, fig_time.*
     lambda.csv       λ study:    lpbench grid         -> lambda_summary.csv, fig_lambda.*
+    kappa.csv        κ study:    lpbench grid --kappas -> kappa.md
     illustrative.csv illustrative problem (lpbench run --set illustrative) -> illustrative.md
 """
 
@@ -295,6 +296,37 @@ def illustrative_markdown(ill: pd.DataFrame) -> str:
     return "\n".join(lines) + "\n"
 
 
+def kappa_markdown(grid: pd.DataFrame, ill: pd.DataFrame | None) -> str:
+    g = grid.copy()
+    g["solved"] = g["status"] == "Solved"
+    lines = ["# Исследование по κ (DLN, класс S)", "",
+             "| κ | Решено | Зазор, медиана | p75 | p90 | Доля с зазором ≤1e-3 | Итерации, медиана |",
+             "|---|---|---|---|---|---|---|"]
+    for kappa, x in g.groupby("kappa"):
+        lines.append(f"| {kappa:g} | {fmt(x['solved'].mean(), 'share')} | {fmt(x['gap'].median(), 'gap')} | "
+                     f"{fmt(x['gap'].quantile(.75), 'gap')} | {fmt(x['gap'].quantile(.9), 'gap')} | "
+                     f"{fmt((x['gap'] <= 1e-3).mean(), 'share')} | {fmt(x['iterations'].median(), 'int')} |")
+    if ill is not None:
+        lines += ["", "Иллюстративная задача", "", "| κ | Итерации | Доход | Зазор |", "|---|---|---|---|"]
+        for _, r in ill.sort_values("kappa").iterrows():
+            lines.append(f"| {r.kappa:g} | {r.iterations} | {r.objective:.6g} | {r.gap:.1e} |")
+    return "\n".join(lines) + "\n"
+
+
+def dln_accuracy_markdown(t: pd.DataFrame) -> str:
+    d = t[(t["method"] == "dln") & (t["class"] == "S")]
+    solved = d[d["status"] == "Solved"]
+    qs = {f"p{int(p * 100)}": d["gap"].quantile(p) for p in (.5, .75, .9, .95)}
+    lines = ["# Точность DLN на классе S", "",
+             f"Задач: {len(d)}, статус Solved: {len(solved)}. "
+             "Статус Solved означает лишь малую невязку ограничений, не точность по целевой функции.", "",
+             "| Квантиль зазора (все задачи S) | Значение |", "|---|---|"]
+    lines += [f"| {k} | {v:.1e} |" for k, v in qs.items()]
+    lines += ["", f"Доля всех задач с зазором ≤1e-3: {fmt((d['gap'] <= 1e-3).mean(), 'share')}; среди Solved-задач "
+              f"с зазором >1e-3: {int((solved['gap'] > 1e-3).sum())} из {len(solved)}."]
+    return "\n".join(lines) + "\n"
+
+
 def with_manifest_fstar(df: pd.DataFrame, manifest: pd.DataFrame | None) -> pd.DataFrame:
     """Recompute gap against the current manifest, so a refined f* does not require rerunning the solvers."""
     if manifest is None:
@@ -327,10 +359,17 @@ def main(argv: list[str] | None = None) -> int:
         (run / "summary.md").write_text(summary_markdown(s), encoding="utf-8")
         (run / "validation.md").write_text(validation_markdown(t), encoding="utf-8")
         fig_time(t, run)
-        done += ["per_task.csv", "summary.csv", "summary.md", "validation.md", "fig_time.png/svg"]
+        (run / "dln_accuracy.md").write_text(dln_accuracy_markdown(t), encoding="utf-8")
+        done += ["per_task.csv", "summary.csv", "summary.md", "validation.md", "dln_accuracy.md", "fig_time.png/svg"]
     if (run / "lambda.csv").exists():
         lambda_study(with_manifest_fstar(pd.read_csv(run / "lambda.csv"), manifest), run, Path(ns.data), manifest)
         done += ["lambda_summary.csv", "fig_lambda.png/svg"]
+    if (run / "kappa.csv").exists():
+        ki = run / "kappa_illustrative.csv"
+        (run / "kappa.md").write_text(kappa_markdown(
+            with_manifest_fstar(pd.read_csv(run / "kappa.csv"), manifest),
+            with_manifest_fstar(pd.read_csv(ki), manifest) if ki.exists() else None), encoding="utf-8")
+        done.append("kappa.md")
     if (run / "illustrative.csv").exists():
         ill = with_manifest_fstar(pd.read_csv(run / "illustrative.csv"), manifest)
         (run / "illustrative.md").write_text(illustrative_markdown(ill), encoding="utf-8")

@@ -73,6 +73,11 @@ RUN_ARGS=(--set main --out "$OUT/raw.csv")
 "$BIN" grid --set main --classes S,M --structures dense,degenerate --max-tasks "$LAMBDA_TASKS" \
   --lambdas "$(grep -E '^lambda_study.lambdas' experiments/params.ini | cut -d= -f2 | tr -d ' ')" \
   --out "$OUT/lambda.csv"
+KAPPAS="$(grep -E '^kappa_study.kappas' experiments/params.ini | cut -d= -f2 | tr -d ' ')"
+"$BIN" grid --set main --classes S --lambdas "$(grep -E '^dln.lambda.S' experiments/params.ini | cut -d= -f2 | tr -d ' ')" \
+  --kappas "$KAPPAS" --out "$OUT/kappa.csv"
+"$BIN" grid --set illustrative --lambdas "$(grep -E '^dln.lambda.S' experiments/params.ini | cut -d= -f2 | tr -d ' ')" \
+  --kappas "$KAPPAS" --out "$OUT/kappa_illustrative.csv"
 
 echo "== 6/6 analysis"
 uv run --project python lpanalyze --run "$OUT"

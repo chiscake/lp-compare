@@ -73,6 +73,10 @@ Invoke-Checked $bin $runArgs
 $lambdas = ((Get-Content experiments/params.ini | Where-Object { $_ -match '^lambda_study.lambdas' }) -split '=')[1].Trim() -replace '\s', ''
 Invoke-Checked $bin @("grid", "--set", "main", "--classes", "S,M", "--structures", "dense,degenerate",
     "--max-tasks", "$lambdaTasks", "--lambdas", $lambdas, "--out", "$out/lambda.csv")
+$kappas = ((Get-Content experiments/params.ini | Where-Object { $_ -match '^kappa_study.kappas' }) -split '=')[1].Trim() -replace '\s', ''
+$lamS = ((Get-Content experiments/params.ini | Where-Object { $_ -match '^dln.lambda.S' }) -split '=')[1].Trim()
+Invoke-Checked $bin @("grid", "--set", "main", "--classes", "S", "--lambdas", $lamS, "--kappas", $kappas, "--out", "$out/kappa.csv")
+Invoke-Checked $bin @("grid", "--set", "illustrative", "--lambdas", $lamS, "--kappas", $kappas, "--out", "$out/kappa_illustrative.csv")
 
 Write-Host "== 6/6 analysis"
 Invoke-Checked uv @("run", "--project", "python", "lpanalyze", "--run", $out)
