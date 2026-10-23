@@ -69,6 +69,13 @@ Quick mode takes ~20 min; full ~6-8 h. `lpbench --help` lists CLI options.
 - Do not add narrating comments in code. Prefer editing existing files over creating new ones.
 - Article constraints: abstract 100-500 chars then a blank line; 5-7 keywords (<= 3 words each, separated by `;`) then a blank line; do not include the illustrative problem's narrative text; GOST STB 7.208-2008 references.
 
+## Cursor Cloud specific instructions
+
+- The Cloud Agent image uses Ubuntu 24.04 packages `dotnet-sdk-10.0` and `dotnet-sdk-aot-10.0`, plus `clang` and `zlib1g-dev`. `dotnet` is `/usr/bin/dotnet`; do not set `DOTNET_ROOT`. The pinned `global.json` (`10.0.100`, `rollForward: latestFeature`) accepts the archive SDK (feature band 10.0.1xx). `dotnet-sdk-aot-10.0` is required for Native AOT: it is only a Recommends of the SDK, so `--no-install-recommends` skips it and `dotnet publish` then fails.
+- `uv` is on `/usr/local/bin` (installer with `UV_NO_MODIFY_PATH=1`). Login shells do not load `~/.bashrc`, so a copy that exists only under `~/.local/bin` is invisible. Python deps come from `uv sync --project python --frozen --python /usr/bin/python3` (system CPython 3.12).
+- `data/` is gitignored. `uv run --project python lpgen --sets illustrative --classes ILL --verify` regenerates `data/illustrative.lpb` and checks its SHA-256. `lpgen` without `--verify` rewrites `experiments/manifest.csv`.
+- Representative check: `dotnet test -c Release` (17 tests), then Native AOT `dotnet publish src/LpBench.Cli -c Release -r linux-x64 -p:LpIsa=native -o artifacts/linux-x64`, then `artifacts/linux-x64/lpbench solve --file data/illustrative.lpb --fstar 150 --class ILL`. Dantzig on that instance is `x = (0, 30, 10, 0)`, objective 150. Do not run `scripts/run.sh --mode full` here (several hours). Quick mode is the long local pipeline (~20 min) and is not required to prove the toolchain. Cloud timings are not the paper reference.
+
 ## Pending / ideas
 
 - Replace cloud timings in `docs/article.md` and the README with the author's local full-run results; add the author name and CPU model.
