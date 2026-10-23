@@ -1,3 +1,4 @@
+.cursor/
 data/
 bin/
 obj/
@@ -7,3 +8,6 @@ __pycache__/
 artifacts/
 agent-tools/
 TestResults/
+
+results/
+!results/cloud-xeon/
