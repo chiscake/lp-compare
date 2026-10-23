@@ -27,6 +27,12 @@ public sealed class DlnSolver : ILpSolver
     /// <summary>Store w = ln u so that coordinates below the double range keep evolving.</summary>
     public bool LogDomain { get; init; }
     public int PowerIterations { get; init; } = 50;
+    /// <summary>
+    /// Called with (iteration, z in original units) at geometrically spaced iterations (ratio ObserveRatio) and at the end.
+    /// Its own run time counts towards the solver deadline; callers that time the solve should exclude it.
+    /// </summary>
+    public Action<int, double[]>? Observer { get; init; }
+    public double ObserveRatio { get; init; } = 1.12;
 
     public string Name => LogDomain ? "dln-log" : "dln";
 
@@ -83,13 +89,21 @@ public sealed class DlnSolver : ILpSolver
         var g = new double[cols];
         for (int j = 0; j < cols; j++) u[j] = Math.Exp(w[j]);
 
-        int iter = 0;
+        int iter = 0, nextObserve = 0, lastObserved = -1;
+        var zObs = Observer is null ? null : new double[n];
         double residual = double.NaN;
         SolveStatus status;
         while (true)
         {
             if (LogDomain) for (int j = 0; j < cols; j++) x[j] = Math.Exp(2 * w[j]);
             else for (int j = 0; j < cols; j++) x[j] = u[j] * u[j];
+            if (zObs is not null && iter >= nextObserve)
+            {
+                for (int j = 0; j < n; j++) zObs[j] = bigM * x[j];
+                Observer!(iter, zObs);
+                lastObserved = iter;
+                nextObserve = Math.Max(iter + 1, (int)Math.Min(int.MaxValue, Math.Ceiling(iter * ObserveRatio)));
+            }
 
             DenseMath.MatVec(a, rows, cols, x, r);
             for (int i = 0; i < rows; i++) r[i] -= b[i];
@@ -112,6 +126,7 @@ public sealed class DlnSolver : ILpSolver
 
         var z = new double[n];
         for (int j = 0; j < n; j++) z[j] = bigM * x[j];
+        if (zObs is not null && lastObserved != iter) Observer!(iter, z);
         return new SolveResult
         {
             Status = status,

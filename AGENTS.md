@@ -12,16 +12,16 @@ A reproducible benchmark for a conference paper (VII МНПК «Цифровая
 
 All solvers are written in C# (.NET 10, Native AOT) on shared dense kernels. Reference optima f* come from HiGHS (Python) and are stored in `experiments/manifest.csv`; C# runs never call an external solver.
 
-Headline finding: Dantzig simplex is accurate and fastest; Bland needs many more pivots; IPM takes 8-22 iterations but costs O(m^3) each; DLN is accurate only on class S because entropic bias requires lambda below the double-precision window on M and larger.
+Headline finding: Dantzig simplex is accurate and faster than our IPM (single-thread HiGHS is 2.4-8.5x faster than the tableau on sparse/degenerate L/XL, slower on dense); Bland needs many more pivots; IPM takes 8-22 iterations but costs O(m^3) each; DLN is accurate only on class S because entropic bias requires lambda below the double-precision window on M and larger.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
 | `src/LpBench.Core/` | Solvers (`TableauSimplex`, `MehrotraIpm`, `DlnSolver`), `DenseMath` (SIMD kernels), `Metrics`, `Problem`/`StandardForm`, `ProblemFile` (LPB1 binary format), `SolveResult` |
-| `src/LpBench.Cli/` | `lpbench` CLI: `env`, `solve`, `run`, `grid`; `Config.cs` (params.ini, manifest, solver factory) |
-| `tests/LpBench.Tests/` | xUnit, 17 tests (Beale cycling, illustrative problem, IPM, DLN bias, I/O, metrics) |
-| `python/lpbench_py/` | `generate.py` (`lpgen`: seeded instances + HiGHS reference), `analyze.py` (`lpanalyze`: tables, figures) |
+| `src/LpBench.Cli/` | `lpbench` CLI: `env`, `solve`, `run`, `grid` (`--max-iter`), `trace` (DLN trajectories for time-to-target); `Config.cs` (params.ini, manifest, solver factory) |
+| `tests/LpBench.Tests/` | xUnit, 18 tests (Beale cycling, illustrative problem, IPM, DLN bias, I/O, metrics) |
+| `python/lpbench_py/` | `generate.py` (`lpgen`: seeded instances + HiGHS reference), `highs_bench.py` (`lphighs`: single-thread HiGHS timings), `analyze.py` (`lpanalyze`: tables, figures, quality/time-to-target, exact entropic decomposition) |
 | `experiments/params.ini` | Frozen method parameters, iteration limits, timeouts, repeats, lambda grid |
 | `experiments/manifest.csv` | 661 instances: seed, SHA-256, f*, certificate |
 | `scripts/run.sh`, `scripts/run.ps1` | End-to-end pipeline (quick/full mode) for Linux/macOS and Windows |
@@ -38,7 +38,7 @@ Prerequisites: .NET SDK 10, `uv`; for Native AOT a C/C++ linker (clang + zlib1g-
 ```bash
 uv run --project python lpgen                  # generate data, verify SHA-256 against manifest
 uv run --project python lpgen --verify         # hashes only
-dotnet test -c Release                         # 17 tests
+dotnet test -c Release                         # 18 tests
 scripts/run.sh [--mode full] [--isa native] [--no-aot] [--label NAME]
 scripts\run.ps1 [-Mode full] [-Isa native] [-NoAot] [-Label NAME]   # Windows
 uv run --project python lpanalyze --run results/<label>   # merges raw*.csv, writes summary/validation/figures
@@ -58,6 +58,8 @@ Quick mode takes ~20 min; full ~6-8 h. `lpbench --help` lists CLI options.
 - Subnormal doubles are very slow on x86; lambda below ~1.4e-3 hits them, below ~6.7e-4 `u0` underflows to zero.
 - Simplex pivot limit is `50 * (2m + n)` (`simplex.max_iter_factor` times rows+columns of the standard form). Pivot counts on degenerate tasks depend on the exact pivot update (reciprocal scaling, exact zeroing of the pivot column): a naive numpy variant gives 129 instead of 102 pivots on `main_M_degenerate_000`; the C# result is deterministic.
 - DLN kappa study: `kappa.md` (kappa 10 is more accurate than the frozen kappa 30 on S, but defaults are kept to avoid rerunning M/L/XL).
+- Expert-review rerun (23.10.2026): `quality.md` (gap <= 1e-3/1e-6/1e-8 with violation <= 1e-6), `dln_decomposition.md` (exact f_lambda by dual Newton for all 570 tasks; L-BFGS failed on L/XL), `lambda_long.md` (log-domain DLN, 3e6 iterations, still gap 0.3-0.8 on M). `lpanalyze` caches `entropic_main.csv`; computing it from scratch takes ~25 min, `--no-entropic` skips it.
+- The VM may pause while the agent only sleeps; wait on long cloud runs with an active shell command (e.g. a `sleep` loop) rather than an idle timer.
 - Bland hits the pivot limit on some L and most sparse/degenerate XL tasks; `validation.md` checks simplex accuracy on solved tasks only.
 
 ## Conventions
@@ -74,7 +76,7 @@ Quick mode takes ~20 min; full ~6-8 h. `lpbench --help` lists CLI options.
 - The Cloud Agent image uses Ubuntu 24.04 packages `dotnet-sdk-10.0` and `dotnet-sdk-aot-10.0`, plus `clang` and `zlib1g-dev`. `dotnet` is `/usr/bin/dotnet`; do not set `DOTNET_ROOT`. The pinned `global.json` (`10.0.100`, `rollForward: latestFeature`) accepts the archive SDK (feature band 10.0.1xx). `dotnet-sdk-aot-10.0` is required for Native AOT: it is only a Recommends of the SDK, so `--no-install-recommends` skips it and `dotnet publish` then fails.
 - `uv` is on `/usr/local/bin` (installer with `UV_NO_MODIFY_PATH=1`). Login shells do not load `~/.bashrc`, so a copy that exists only under `~/.local/bin` is invisible. Python deps come from `uv sync --project python --frozen --python /usr/bin/python3` (system CPython 3.12).
 - `data/` is gitignored. `uv run --project python lpgen --sets illustrative --classes ILL --verify` regenerates `data/illustrative.lpb` and checks its SHA-256. `lpgen` without `--verify` rewrites `experiments/manifest.csv`.
-- Representative check: `dotnet test -c Release` (17 tests), then Native AOT `dotnet publish src/LpBench.Cli -c Release -r linux-x64 -p:LpIsa=native -o artifacts/linux-x64`, then `artifacts/linux-x64/lpbench solve --file data/illustrative.lpb --fstar 150 --class ILL`. Dantzig on that instance is `x = (0, 30, 10, 0)`, objective 150. Do not run `scripts/run.sh --mode full` here (several hours). Quick mode is the long local pipeline (~20 min) and is not required to prove the toolchain. Cloud timings are not the paper reference.
+- Representative check: `dotnet test -c Release` (18 tests), then Native AOT `dotnet publish src/LpBench.Cli -c Release -r linux-x64 -p:LpIsa=native -o artifacts/linux-x64`, then `artifacts/linux-x64/lpbench solve --file data/illustrative.lpb --fstar 150 --class ILL`. Dantzig on that instance is `x = (0, 30, 10, 0)`, objective 150. Do not run `scripts/run.sh --mode full` here (several hours). Quick mode is the long local pipeline (~20 min) and is not required to prove the toolchain. Cloud timings are not the paper reference.
 
 ## Pending / ideas
 

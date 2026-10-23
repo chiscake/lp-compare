@@ -78,7 +78,8 @@ internal static class SolverFactory
 {
     public static readonly string[] AllMethods = ["dantzig", "bland", "ipm", "dln"];
 
-    public static ILpSolver Create(string method, Params p, string cls, double? lambda = null, double? kappa = null, bool? logDomain = null) =>
+    public static ILpSolver Create(string method, Params p, string cls, double? lambda = null, double? kappa = null, bool? logDomain = null,
+        Action<int, double[]>? observer = null) =>
         method switch
         {
             "dantzig" => new TableauSimplex(PivotRule.Dantzig)
@@ -97,6 +98,7 @@ internal static class SolverFactory
                 Tolerance = p.D("dln.tol"),
                 RowScale = p.B("dln.row_scale"),
                 LogDomain = logDomain ?? (method == "dln-log" || p.B("dln.log_domain")),
+                Observer = observer,
             },
             _ => throw new ArgumentException($"Unknown method '{method}'. Known: {string.Join(", ", AllMethods)}, dln-log."),
         };

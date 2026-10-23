@@ -182,6 +182,22 @@ public class SolverTests
     }
 
     [Fact]
+    public void Dln_Observer_SeesGeometricScheduleAndFinalIterate()
+    {
+        var sf = StandardForm.FromResourceProblem(Illustrative());
+        var seen = new List<(int Iter, double Objective)>();
+        var observed = new DlnSolver { Lambda = 0.02, Kappa = 10, Observer = (k, z) => seen.Add((k, DenseMath.Dot(sf.C, z))) }
+            .Solve(sf, Default);
+        var plain = new DlnSolver { Lambda = 0.02, Kappa = 10 }.Solve(sf, Default);
+        Assert.Equal(plain.Iterations, observed.Iterations);
+        Assert.Equal(0, seen[0].Iter);
+        Assert.Equal(observed.Iterations, seen[^1].Iter);
+        Assert.Equal(observed.Objective, seen[^1].Objective, 12);
+        Assert.InRange(seen.Count, 10, 40 * Math.Log10(Math.Max(10, observed.Iterations)));
+        Assert.True(seen.Zip(seen.Skip(1)).All(p => p.First.Iter < p.Second.Iter));
+    }
+
+    [Fact]
     public void Dln_Infeasible_IsNotSolved()
     {
         // x₁ ≤ 1 and x₁ ≥ 2 written as resource rows cannot be encoded with A ≥ 0, b > 0;

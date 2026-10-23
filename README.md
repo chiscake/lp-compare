@@ -24,19 +24,23 @@
 Медианы по задачам класса (все три структуры): время, мс (итерации). Полные таблицы — [`summary.md`](results/cloud-xeon/summary.md),
 проверка точности — [`validation.md`](results/cloud-xeon/validation.md).
 
-| Класс | Данциг | Бланд | IPM | DLN | Зазор DLN |
-|---|---|---|---|---|---|
-| S 10×20 | 0.0017 (7) | 0.0028 (14) | 0.024 (8) | 12.6 (43 628) | 4.5e-6 |
-| M 100×200 | 0.73 (123) | 7.7 (1442) | 4.3 (13) | 2887 (лимит) | 0.13 |
-| L 500×1000 | 396 (2102) | 12 088 (63 539) | 857 (19) | 6566 (лимит) | 1.0 |
-| XL 1000×2000 | 5502 (6800) | 157 204 (лимит в 67 %) | 9047 (22) | 6895 (лимит) | 0.98 |
+| Класс | Данциг | Бланд | IPM | HiGHS ДС | DLN | Зазор DLN |
+|---|---|---|---|---|---|---|
+| S 10×20 | 0.0017 (7) | 0.0025 (14) | 0.022 (8) | 0.15 (6) | 12.7 (43 628) | 4.5e-6 |
+| M 100×200 | 0.72 (123) | 7.7 (1442) | 4.3 (13) | 4.5 (86) | 2878 (лимит) | 0.13 |
+| L 500×1000 | 403 (2102) | 12 188 (63 539) | 883 (19) | 170 (485) | 6653 (лимит) | 1.0 |
+| XL 1000×2000 | 5433 (6800) | 157 569 (лимит в 67 %) | 9001 (22) | 900 (1152) | 7191 (лимит) | 0.98 |
 
 - Оба правила симплекса совпадают с эталоном до $3\cdot10^{-13}$; IPM решает 100 % задач с зазором $\le1.3\cdot10^{-8}$.
-- Правило Данцига быстрее IPM почти везде (на плотных — в 21–36 раз, на разреженных/вырожденных XL — в 1.3–1.4 раза).
-  Бланд делает в 7–32 раза больше пивотов начиная с M.
-- DLN точен лишь на части задач S (зазор ≤1e-3 у 76 %, p90 6.5e-3; точность зависит от κ, см. [`kappa.md`](results/cloud-xeon/kappa.md)); времена DLN на M+ — до лимита итераций. Начиная с M мешает само энтропийное смещение: точное регуляризованное решение отстоит от
-  оптимума на 8 % при $\lambda=3\cdot10^{-3}$ и на 0.2 % лишь при $\lambda=5\cdot10^{-4}$, где в double обнуляется
-  инициализация (обычный DLN ломается, лог-вариант — нет). В зоне денормалов итерация медленнее в 2.4–4.5 раза.
+- Правило Данцига быстрее нашего IPM почти везде (на плотных — в 19–37 раз, на разреженных/вырожденных XL — в 1.4–1.5 раза).
+  Однопоточный HiGHS (двойственный симплекс, разреженная алгебра) на разреженных/вырожденных L и XL быстрее таблицы
+  в 2.4–8.5 раза, на плотных L и XL — медленнее в 3.5–7 раз. Бланд делает в 7–32 раза больше пивотов начиная с M.
+- DLN решает с качеством $10^{-3}$, $10^{-6}$, $10^{-8}$ (зазор при невязке $\le10^{-6}$) 70, 45 и 6 % задач S и ни одной
+  задачи M–XL ([`quality.md`](results/cloud-xeon/quality.md)). Разложение по точному решению регуляризованной задачи
+  ([`dln_decomposition.md`](results/cloud-xeon/dln_decomposition.md)): на L смещение регуляризации — 1.0 при ошибке
+  оптимизации $10^{-4}$, на M они сопоставимы (0.075 и 0.076), на S преобладает ошибка оптимизации (κ, лимит).
+  Нужные $\lambda$ лежат ниже окна double; DLN с $\ln u$ за $3\cdot10^6$ итераций на M остаётся на зазоре 0.3–0.8
+  ([`lambda_long.md`](results/cloud-xeon/lambda_long.md)).
 
 ## Быстрый старт
 
@@ -51,7 +55,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 # Native AOT: Visual Studio 2022 или Build Tools с нагрузкой «Разработка классических приложений на C++»
 #   https://aka.ms/vs/17/release/vs_BuildTools.exe   (без неё используйте ключ -NoAot)
 
-git clone <url-репозитория> lp-methods; cd lp-methods
+git clone https://origin.cursor.com/git/chis/lp-compare.git lp-methods; cd lp-methods
 powershell -ExecutionPolicy Bypass -File scripts\run.ps1            # быстрый режим, ~10–20 мин
 powershell -ExecutionPolicy Bypass -File scripts\run.ps1 -Mode full # полный эксперимент, несколько часов
 ```
@@ -63,7 +67,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run.ps1 -Mode full # полны
 curl -LsSf https://astral.sh/uv/install.sh | sh
 # Native AOT: Ubuntu/Debian — sudo apt install clang zlib1g-dev;  macOS — xcode-select --install
 
-git clone <url-репозитория> lp-methods && cd lp-methods
+git clone https://origin.cursor.com/git/chis/lp-compare.git lp-methods && cd lp-methods
 scripts/run.sh                 # быстрый режим
 scripts/run.sh --mode full     # полный эксперимент
 ```
@@ -78,14 +82,18 @@ scripts/run.sh --mode full     # полный эксперимент
 3. Собирает Native AOT-бинарник под вашу ОС и процессор.
 4. Пишет отчёт о среде `env.txt`: CPU, ядра, ОЗУ, ОС, версия рантайма, ширина `Vector<double>`, поддержка AVX2/AVX-512/NEON,
    замедление арифметики на субнормальных числах.
-5. Прогоны: иллюстративная задача, основной набор (`raw.csv`), исследование $\lambda$ для DLN (`lambda.csv`).
-6. Анализ: `summary.md`/`summary.csv` (min/медиана/p90/max по классам и методам), `validation.md`, `fig_time.*`,
-   `fig_lambda.*`, `illustrative.md`.
+5. Прогоны: иллюстративная задача, основной набор (`raw.csv`), траектории DLN и DLN с $\ln u$ (`trace.csv`, время до
+   заданного зазора), однопоточный HiGHS как промышленный ориентир по времени (`highs.csv`), исследования $\lambda$
+   (`lambda.csv`; в полном режиме также L — `lambda_large.csv` и длинные прогоны ниже окна double — `lambda_long.csv`) и $\kappa$.
+6. Анализ: `summary.md`/`summary.csv` (min/медиана/p90/max и разброс повторов), `validation.md`, `quality.md` (доля задач,
+   решённых с зазором $\le10^{-3},10^{-6},10^{-8}$ при допустимости, и время до этого), `dln_decomposition.md` (смещение
+   регуляризации и ошибка оптимизации DLN по точному решению регуляризованной задачи на каждой задаче),
+   `lambda_long.md`, `kappa.md`, `fig_time.*`, `fig_lambda.*`, `illustrative.md`.
 
 | Режим | Задачи | Повторы | Время на современном ПК |
 |---|---|---|---|
 | `quick` | иллюстративная, S и M по 10 на структуру, $\lambda$-исследование по 5 задач | 1 + 3 | ~10–20 мин |
-| `full` | все 570 задач основного набора (S/M/L/XL), $\lambda$-исследование по 20 задач | 1 + 5 (XL и DLN на M+ — 1) | ~6–8 ч (основная доля — Бланд и DLN на L/XL) |
+| `full` | все 570 задач основного набора (S/M/L/XL), траектории DLN, HiGHS, $\lambda$-исследование по 20 задач (L — по 5) и длинные log-прогоны | 1 + 5 (XL и DLN на M+ — 0/1 + 3, Бланд на XL — 1) | ~8–10 ч последовательно; в облаке 4 части на 4 ядрах ≈ 4 ч |
 
 ## Запуск на других процессорах
 
@@ -139,6 +147,9 @@ $B solve --file data/illustrative.lpb --fstar 150 --class ILL
 $B run  --set main --classes S,M --max-tasks 10 --out results/my/raw.csv
 $B run  --set main --classes XL --out results/my/raw_xl.csv   # части можно гонять параллельно на разных ядрах; lpanalyze объединяет raw*.csv
 $B grid --set main --classes S --structures dense --lambdas 0.01,0.005,0.002 --modes plain,log --out results/my/lambda.csv
+$B grid --set main --classes M --structures dense --max-tasks 10 --lambdas 0.0005 --modes log --max-iter 3000000 --out results/my/lambda_long.csv
+$B trace --set main --classes S,M --methods dln,dln-log --out results/my/trace.csv   # траектории DLN: время до зазора
+uv run --project python lphighs --classes S,M --out results/my/highs.csv             # HiGHS, 1 поток, 3 повтора
 uv run --project python lpanalyze --run results/my
 ```
 
@@ -149,9 +160,10 @@ uv run --project python lpanalyze --run results/my
 
 ```
 src/LpBench.Core/       решатели: TableauSimplex, MehrotraIpm, DlnSolver; DenseMath (общие векторные ядра); метрики; формат LPB1
-src/LpBench.Cli/        консольное приложение lpbench (env, solve, run, grid), Native AOT
+src/LpBench.Cli/        консольное приложение lpbench (env, solve, run, grid, trace), Native AOT
 tests/LpBench.Tests/    xUnit: ручные задачи, иллюстративная задача, пример Била (зацикливание Данцига), статусы, I/O
-python/lpbench_py/      generate.py (генератор + HiGHS), analyze.py (таблицы и рисунки)
+python/lpbench_py/      generate.py (генератор + HiGHS), highs_bench.py (время HiGHS), analyze.py (таблицы, рисунки, точное
+                        решение регуляризованной задачи)
 experiments/            params.ini (замороженные параметры), manifest.csv (seed, SHA-256, f*)
 scripts/                run.ps1 (Windows), run.sh (Linux/macOS)
 results/<машина>/       результаты прогонов
@@ -161,7 +173,9 @@ data/                   сгенерированные задачи (≈ 0.85 Г
 ## Ограничения
 
 - Симплекс — учебная плотная таблица, IPM — плотные нормальные уравнения; это не промышленные решатели, а
-  одинаково написанные реализации для сравнения методов в равных условиях.
+  одинаково написанные реализации для сравнения методов в равных условиях. Как ориентир сильной реализации
+  приведено время однопоточного HiGHS (модифицированный двойственный симплекс и IPM с разреженной алгеброй и presolve);
+  оно измерено из Python (`highspy`, таймер вокруг `Highs.run()`), поэтому на S включает накладные расходы вызова.
 - Все матрицы плотные, поэтому разреженность ускорения не даёт; разреженные задачи отличаются только численно.
 - DLN использует редукцию из Remark 1.1 статьи (ограничение суммы и сдвиг стоимостей), так как статья требует
   $c>0$; детали и проверка условий — `docs/theory-and-plan.md`, п. 2.
