@@ -18,12 +18,16 @@ param.dln.tol: 1e-8
 param.ipm.max_iter: 100
 param.ipm.step_fraction: 0.995
 param.ipm.tol: 1e-8
+param.kappa_study.kappas: 1,3,10,30
 param.lambda_study.lambdas: 0.05,0.02,0.01,0.005,0.003,0.002,0.0014,0.001,0.0007,0.0005
+param.long_study.lambdas: 0.001,0.0005,0.0002
+param.long_study.max_iter: 3000000
 param.repeats: 5
-param.repeats.XL: 1
-param.repeats.dln.L: 1
-param.repeats.dln.M: 1
-param.repeats.dln.XL: 1
+param.repeats.XL: 3
+param.repeats.bland.XL: 1
+param.repeats.dln.L: 3
+param.repeats.dln.M: 3
+param.repeats.dln.XL: 3
 param.simplex.max_iter_factor: 50
 param.simplex.tol_d: 1e-9
 param.simplex.tol_p: 1e-9
@@ -33,15 +37,16 @@ param.timeout.M: 60
 param.timeout.S: 10
 param.timeout.XL: 600
 param.warmup: 1
-param.warmup.XL: 0
+param.warmup.XL: 1
+param.warmup.bland.XL: 0
 param.warmup.dln.L: 0
 param.warmup.dln.M: 0
 param.warmup.dln.XL: 0
 # environment
-timestamp_utc: 2026-10-15T12:02:01.2556693Z
+timestamp_utc: 2026-10-23T15:26:12.9796428Z
 cpu: Intel(R) Xeon(R) Processor
-logical_cores: 4
-memory_total_gb: 16.8
+logical_cores: 1
+memory_total_gb: 11.8
 os: Ubuntu 24.04.5 LTS
 arch: X64
 rid: linux-x64
