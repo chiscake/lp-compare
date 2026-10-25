@@ -9,5 +9,8 @@ artifacts/
 agent-tools/
 TestResults/
 
-results/
+results/*
 !results/cloud-xeon/
+!results/cloud-xeon/**
+!results/local-Ryzen-7-7445HS/
+!results/local-Ryzen-7-7445HS/**
