@@ -296,40 +296,58 @@ def lambda_study(grid: pd.DataFrame, out: Path, data: Path | None, manifest: pd.
             ent = pd.DataFrame(rows)
             ent.to_csv(out / "lambda_entropic.csv", index=False)
 
-    classes = [c for c in CLASS_ORDER if c in set(s["class"])]
-    fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8))
-    colors = {"S": "#1f77b4", "M": "#d62728", "L": "#2ca02c", "XL": "#9467bd"}
-    markers = {"dense": "o", "degenerate": "s", "sparse": "^"}
-    for (cls, st, mode, kappa), x in s.groupby(["class", "structure", "mode", "kappa"]):
+    fig_lambda(s, ent, out)
+
+
+FIG_W_IN = 16 / 2.54  # ширина полосы набора 16 см
+
+
+def fig_lambda(s: pd.DataFrame, ent: pd.DataFrame, out: Path, panels: str = "both", name: str = "fig_lambda") -> None:
+    """Упрощённый рисунок λ-исследования для печати в 16 см: только хранение u (без log), цвет — класс,
+    маркер/тип линии — структура, точный энтропийный предел — крестики, легенда под осями."""
+    plt.rcParams.update({"font.size": 9, "axes.labelsize": 9, "xtick.labelsize": 8, "ytick.labelsize": 8,
+                         "legend.fontsize": 8})
+    s = s[s["mode"] == "plain"]
+    colors = {"S": "#0072B2", "M": "#D55E00", "L": "#009E73", "XL": "#CC79A7"}  # различимы и при ч/б печати по маркерам
+    styles = {"dense": ("o", "-"), "degenerate": ("s", "--"), "sparse": ("^", ":")}
+    both = panels == "both"
+    fig, axes = plt.subplots(1, 2 if both else 1, figsize=(FIG_W_IN, 2.7 if both else 2.6), squeeze=False)
+    axes = axes[0]
+    for (cls, st, kappa), x in s.groupby(["class", "structure", "kappa"]):
         x = x.sort_values("lambda")
-        lab = f"{cls}, {STRUCT_LABEL.get(st, st)}" + (" (log)" if mode == "log" else "")
-        ls = "--" if mode == "log" else "-"
-        axes[0].plot(x["lambda"], x["gap_median"].clip(lower=1e-16), ls, marker=markers.get(st, "o"), ms=4,
-                     color=colors.get(cls, "k"), label=lab)
-        axes[1].plot(x["lambda"], x["iter_median"], ls, marker=markers.get(st, "o"), ms=4, color=colors.get(cls, "k"), label=lab)
+        mk, ls = styles.get(st, ("o", "-"))
+        kw = dict(ls=ls, marker=mk, ms=3.5, lw=1.1, color=colors.get(cls, "k"), mfc="white", mew=1.0)
+        axes[0].plot(x["lambda"], x["gap_median"].clip(lower=1e-16), **kw)
+        if both:
+            axes[1].plot(x["lambda"], x["iter_median"], **kw)
     if len(ent):
         for cls, x in ent.groupby("class"):
             med = x.groupby("lambda")["gap"].median().dropna()
-            axes[0].plot(med.index, med.values.clip(1e-16), "x", ms=6, mew=1.5, color=colors.get(cls, "k"),
-                         label=f"{cls}: точный энтропийный предел")
-    if s["bound_median"].notna().any():
-        b = s[(s["structure"] == "dense") & (s["mode"] == "plain")].groupby("lambda")["bound_median"].median()
-        axes[0].plot(b.index, b.values, "k:", lw=1, label="оценка λ·ln N·c̄M/f*")
+            axes[0].plot(med.index, med.values.clip(1e-16), "x", ms=6, mew=1.6, color=colors.get(cls, "k"))
     for ax in axes:
-        ax.axvline(1.4e-3, color="grey", lw=0.8, ls="-.")
-        ax.axvline(6.7e-4, color="grey", lw=0.8, ls=":")
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlabel("λ")
-        ax.grid(True, which="both", alpha=0.3)
-    axes[0].set_ylabel("Относительный зазор (медиана)")
-    axes[1].set_ylabel("Итерации (медиана)")
-    axes[0].legend(fontsize=7)
-    fig.suptitle(f"DLN: зазор и число итераций от λ (κ = {', '.join(str(k) for k in sorted(s['kappa'].unique()))}; "
-                 f"классы {', '.join(classes)})", fontsize=9)
-    fig.tight_layout()
+        ax.axvline(1.4e-3, color="0.4", lw=0.8, ls="-.")
+        ax.axvline(6.7e-4, color="0.4", lw=0.8, ls=(0, (1, 1)))
+        ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlabel("λ")
+        ax.grid(True, which="major", alpha=0.3)
+    axes[0].set_ylabel("Зазор (медиана)")
+    if both:
+        axes[1].set_ylabel("Итерации (медиана)")
+    from matplotlib.lines import Line2D
+    classes = [c for c in CLASS_ORDER if c in set(s["class"])]
+    h = [Line2D([], [], color=colors[c], lw=2.5) for c in classes]
+    lab = list(classes)
+    for st in [t for t in STRUCT_ORDER if t in set(s["structure"])]:
+        mk, ls = styles[st]
+        h.append(Line2D([], [], color="k", ls=ls, marker=mk, ms=3.5, mfc="white", lw=1.1)); lab.append(STRUCT_LABEL.get(st, st))
+    if len(ent):
+        h.append(Line2D([], [], color="k", ls="", marker="x", ms=6, mew=1.6)); lab.append("точный предел")
+    h += [Line2D([], [], color="0.4", lw=0.8, ls="-."), Line2D([], [], color="0.4", lw=0.8, ls=(0, (1, 1)))]
+    lab += ["λ = 1,4·10⁻³", "λ = 6,7·10⁻⁴"]
+    fig.legend(h, lab, loc="lower center", ncol=5 if both else 4, frameon=False, columnspacing=1.2,
+               handlelength=2.2, bbox_to_anchor=(0.5, 0.0))
+    fig.tight_layout(rect=(0, 0.17 if both else 0.15, 1, 1))
     for ext in ("png", "svg"):
-        fig.savefig(out / f"fig_lambda.{ext}", dpi=200)
+        fig.savefig(out / f"{name}.{ext}", dpi=300)
     plt.close(fig)
 
 
