@@ -329,7 +329,7 @@ def fig_lambda(s: pd.DataFrame, ent: pd.DataFrame, out: Path, panels: str = "bot
         ax.axvline(6.7e-4, color="0.4", lw=0.8, ls=(0, (1, 1)))
         ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlabel("λ")
         ax.grid(True, which="major", alpha=0.3)
-    axes[0].set_ylabel("Зазор (медиана)")
+    axes[0].set_ylabel("Относительная\nпогрешность")
     if both:
         axes[1].set_ylabel("Итерации (медиана)")
     from matplotlib.lines import Line2D
